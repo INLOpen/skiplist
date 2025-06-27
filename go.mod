@@ -1,3 +1,3 @@
 module github.com/INLOpen/skiplist
 
-go 1.23.10
+go 1.22
