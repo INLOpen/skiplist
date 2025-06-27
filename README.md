@@ -1,6 +1,6 @@
 # Go Generic Skiplist
 
-[![Go Report Card](https://goreportcard.com/badge/github.com/INLOpen/skiplist)](https://goreportcard.com/report/github.com/INLOpen/skiplist)
+[![Go](https://github.com/INLOpen/skiplist/actions/workflows/go.yml/badge.svg?branch=main)](https://github.com/INLOpen/skiplist/actions/workflows/go.yml) [![Go Report Card](https://goreportcard.com/badge/github.com/INLOpen/skiplist)](https://goreportcard.com/report/github.com/INLOpen/skiplist) [![Go Reference](https://pkg.go.dev/badge/github.com/INLOpen/skiplist.svg)](https://pkg.go.dev/github.com/INLOpen/skiplist)
 
 A thread-safe, high-performance, generic skiplist implementation in Go.
 
@@ -15,6 +15,35 @@ This library provides a skiplist data structure that is easy to use, highly effi
 *   **🤝 Thread-Safe**: All operations are safe for concurrent use from multiple goroutines.
 *   **✨ Rich API**: Includes a comprehensive set of methods like `RangeQuery`, `PopMin`, `PopMax`, `Predecessor`, `Successor`, and more.
 *   **🚶 Full-Featured Iterator**: Provides a powerful iterator with `Seek`, `Next`, `Rewind`, etc., for flexible data traversal.
+
+## Performance
+
+Benchmarks are run against Go's built-in `map` for comparison. The results show that while `map` is faster for basic unsorted operations, the skiplist offers competitive performance, especially in high-churn scenarios, and provides the unique advantage of ordered data traversal.
+
+*   **`Insert/Search/Delete`**: The native `map` is faster due to its highly optimized hash table implementation. The skiplist has overhead from maintaining sorted order and managing pointers across multiple levels.
+*   **`Insert_SingleOp_Warm`**: This benchmark highlights the power of `sync.Pool`. When nodes are recycled, skiplist insertion performance is excellent, with **zero allocations per operation**, making it ideal for workloads with frequent insertions and deletions.
+*   **`Churn`**: This test (delete one, insert one) further demonstrates the skiplist's efficiency in dynamic datasets where memory reuse is critical.
+*   **Iteration (`Range` vs. `Iterator`)**:
+    *   `Range` and `RangeWithIterator` are the most efficient ways to iterate, holding a single lock for the entire duration.
+    *   The standard `Iterator` (`Iterator_Safe`) is significantly slower because it acquires a lock for *every operation* (`Valid`, `Key`, `Next`), making it safe but less performant for full scans. Use it when you need fine-grained control and cannot hold a lock for the entire loop.
+
+**Conclusion**: Choose this skiplist when you need **sorted data**, **ordered iteration (Range queries)**, or **high performance in high-churn environments** to reduce GC pressure. For simple, unordered key-value storage, the built-in `map` is typically faster.
+
+*Results on `13th Gen Intel(R) Core(TM) i9-13900H` with `benchmarkSize = 10000`*
+
+| Benchmark                               | ns/op      | B/op | allocs/op |
+| --------------------------------------- | ---------- | ---- | --------- |
+| `BenchmarkSkipList_Insert`              | 1931       | 58   | 2         |
+| `BenchmarkMap_Insert`                   | 84.07      | 0    | 0         |
+| `BenchmarkSkipList_Search`              | 228.9      | 0    | 0         |
+| `BenchmarkMap_Search`                   | 20.16      | 0    | 0         |
+| `BenchmarkSkipList_Delete`              | 497.0      | 0    | 0         |
+| `BenchmarkMap_Delete`                   | 51.45      | 0    | 0         |
+| `BenchmarkSkipList_Insert_SingleOp_Warm`| 86.69      | 0    | 0         |
+| `BenchmarkSkipList_Churn`               | 301.3      | 0    | 0         |
+| `BenchmarkSkipList_Range`               | 113397     | 51   | 0         |
+| `BenchmarkSkipList_Iterator_Safe`       | 583459     | 262  | 0         |
+| `BenchmarkSkipList_RangeWithIterator`   | 107438     | 71   | 1         |
 
 ## Installation
 
@@ -46,9 +75,9 @@ func main() {
 	sl.Insert(20, "twenty")
 
 	// Search for a value
-	value, ok := sl.Search(20)
+	node, ok := sl.Search(20) // Search now returns *Node[K,V], bool
 	if ok {
-		fmt.Printf("Found key 20 with value: %s\n", value) // "twenty"
+		fmt.Printf("Found key 20 with value: %s\n", node.Value) // "twenty"
 	}
 
 	// Iterate over all items in sorted order
@@ -58,10 +87,10 @@ func main() {
 		return true // Continue iteration
 	})
 
-	// Pop the maximum element
-	maxKey, maxVal, ok := sl.PopMax()
+	// Pop the maximum element (PopMax now returns *Node[K,V], bool)
+	maxNode, ok := sl.PopMax()
 	if ok {
-		fmt.Printf("Popped max element: %d -> %s\n", maxKey, maxVal) // 30 -> "thirty"
+		fmt.Printf("Popped max element: %d -> %s\n", maxNode.Key, maxNode.Value) // 30 -> "thirty"
 	}
 
 	fmt.Printf("Current length: %d\n", sl.Len()) // 2
@@ -126,7 +155,7 @@ func main() {
 	sl.Insert(10, "A")
 	sl.Insert(20, "B")
 	sl.Insert(30, "C")
-	sl.Insert(40, "D")
+	sl.Insert(40, "D") // [Minor: This line was missing in the original diff, adding it for completeness]
 
 	// Create a new iterator
 	it := sl.NewIterator()
@@ -154,17 +183,17 @@ func main() {
 
 ### Basic Operations
 *   `(sl *SkipList[K, V]) Insert(key K, value V)`
-*   `(sl *SkipList[K, V]) Search(key K) (V, bool)`
+*   `(sl *SkipList[K, V]) Search(key K) (*Node[K, V], bool)`
 *   `(sl *SkipList[K, V]) Delete(key K) bool`
 *   `(sl *SkipList[K, V]) Len() int`
 
 ### Ordered Operations
-*   `(sl *SkipList[K, V]) Min() (K, V, bool)`
-*   `(sl *SkipList[K, V]) Max() (K, V, bool)`
-*   `(sl *SkipList[K, V]) PopMin() (K, V, bool)`
-*   `(sl *SkipList[K, V]) PopMax() (K, V, bool)`
-*   `(sl *SkipList[K, V]) Predecessor(key K) (K, V, bool)`
-*   `(sl *SkipList[K, V]) Successor(key K) (K, V, bool)`
+*   `(sl *SkipList[K, V]) Min() (*Node[K, V], bool)`
+*   `(sl *SkipList[K, V]) Max() (*Node[K, V], bool)`
+*   `(sl *SkipList[K, V]) PopMin() (*Node[K, V], bool)`
+*   `(sl *SkipList[K, V]) PopMax() (*Node[K, V], bool)`
+*   `(sl *SkipList[K, V]) Predecessor(key K) (*Node[K, V], bool)`
+*   `(sl *SkipList[K, V]) Successor(key K) (*Node[K, V], bool)`
 
 ### Iteration & Range
 *   `(sl *SkipList[K, V]) Range(f func(key K, value V) bool)`

@@ -25,8 +25,8 @@ const (
 
 // Node คือโหนดแต่ละตัวใน skiplist
 type Node[K any, V any] struct {
-	key     K
-	value   V
+	Key     K
+	Value   V
 	forward []*Node[K, V] // สไลซ์ของตัวชี้ไปยังโหนดถัดไปในแต่ละชั้น
 }
 
@@ -138,7 +138,7 @@ func (sl *SkipList[K, V]) randomLevel() int {
 // Search searches for a value by its key.
 // It returns the value and true if the key is found, otherwise it returns the zero value for V and false.
 // คืนค่า value และ true หากพบ, มิฉะนั้นคืนค่า zero value และ false
-func (sl *SkipList[K, V]) Search(key K) (V, bool) {
+func (sl *SkipList[K, V]) Search(key K) (*Node[K, V], bool) {
 	sl.mutex.RLock()
 	defer sl.mutex.RUnlock()
 
@@ -147,7 +147,7 @@ func (sl *SkipList[K, V]) Search(key K) (V, bool) {
 	// เริ่มค้นหาจากชั้นบนสุดลงมา
 	for i := sl.level; i >= 0; i-- {
 		// วิ่งไปข้างหน้าในชั้นปัจจุบันจนกว่าโหนดถัดไปจะมี key มากกว่าหรือเท่ากับ key ที่ค้นหา
-		for current.forward[i] != nil && sl.compare(current.forward[i].key, key) < 0 {
+		for current.forward[i] != nil && sl.compare(current.forward[i].Key, key) < 0 {
 			current = current.forward[i]
 		}
 	}
@@ -157,19 +157,18 @@ func (sl *SkipList[K, V]) Search(key K) (V, bool) {
 	current = current.forward[0]
 
 	// ตรวจสอบว่าโหนดปัจจุบันคือโหนดที่ต้องการหรือไม่
-	if current != nil && sl.compare(current.key, key) == 0 {
-		return current.value, true
+	if current != nil && sl.compare(current.Key, key) == 0 {
+		return current, true
 	}
 
-	var zero V
-	return zero, false
+	return nil, false
 }
 
 // Insert เพิ่ม key-value คู่ใหม่เข้าไปใน skiplist
 // Insert adds a new key-value pair to the skiplist.
 // If the key already exists, its value is updated.
 // หาก key มีอยู่แล้ว จะทำการอัปเดต value เดิม
-func (sl *SkipList[K, V]) Insert(key K, value V) {
+func (sl *SkipList[K, V]) Insert(key K, value V) *Node[K, V] {
 	sl.mutex.Lock()
 	defer sl.mutex.Unlock()
 
@@ -180,7 +179,7 @@ func (sl *SkipList[K, V]) Insert(key K, value V) {
 
 	// ค้นหาตำแหน่งที่จะเพิ่มโหนดใหม่ พร้อมทั้งบันทึกโหนดที่จะต้องอัปเดต
 	for i := sl.level; i >= 0; i-- {
-		for current.forward[i] != nil && sl.compare(current.forward[i].key, key) < 0 {
+		for current.forward[i] != nil && sl.compare(current.forward[i].Key, key) < 0 {
 			current = current.forward[i]
 		}
 		update[i] = current
@@ -189,9 +188,10 @@ func (sl *SkipList[K, V]) Insert(key K, value V) {
 	current = current.forward[0]
 
 	// ถ้า key มีอยู่แล้ว ให้อัปเดต value แล้วจบการทำงาน
-	if current != nil && sl.compare(current.key, key) == 0 {
-		current.value = value
-		return
+	if current != nil && sl.compare(current.Key, key) == 0 {
+		old := current
+		current.Value = value
+		return old
 	}
 
 	// ถ้า key ยังไม่มีอยู่ ให้สร้างโหนดใหม่
@@ -209,8 +209,8 @@ func (sl *SkipList[K, V]) Insert(key K, value V) {
 
 	// ดึงโหนดจาก Pool มาใช้ใหม่แทนการสร้างใหม่ทุกครั้ง
 	newNode := sl.pool.p.Get().(*Node[K, V])
-	newNode.key = key
-	newNode.value = value
+	newNode.Key = key
+	newNode.Value = value
 
 	// ตรวจสอบและปรับขนาดของ forward slice ให้เหมาะสมกับ level ใหม่
 	// หาก capacity ของ slice ที่มีอยู่ไม่พอ ให้สร้างใหม่
@@ -227,6 +227,7 @@ func (sl *SkipList[K, V]) Insert(key K, value V) {
 	}
 
 	sl.length++
+	return nil
 }
 
 // deleteNode เป็น helper ภายในที่จัดการตรรกะการลบโหนด
@@ -247,8 +248,10 @@ func (sl *SkipList[K, V]) deleteNode(nodeToRemove *Node[K, V], update []*Node[K,
 	}
 
 	// คืนโหนดกลับเข้า Pool
+	var zeroK K
 	var zeroV V
-	nodeToRemove.value = zeroV // เคลียร์ value
+	nodeToRemove.Key = zeroK   // เคลียร์ key
+	nodeToRemove.Value = zeroV // เคลียร์ value
 	for i := range nodeToRemove.forward {
 		nodeToRemove.forward[i] = nil
 	}
@@ -270,7 +273,7 @@ func (sl *SkipList[K, V]) Delete(key K) bool {
 
 	// ค้นหาโหนดที่จะลบ พร้อมทั้งบันทึกโหนดที่จะต้องอัปเดต
 	for i := sl.level; i >= 0; i-- {
-		for current.forward[i] != nil && sl.compare(current.forward[i].key, key) < 0 {
+		for current.forward[i] != nil && sl.compare(current.forward[i].Key, key) < 0 {
 			current = current.forward[i]
 		}
 		update[i] = current
@@ -279,7 +282,7 @@ func (sl *SkipList[K, V]) Delete(key K) bool {
 	current = current.forward[0]
 
 	// ถ้าพบโหนดที่ต้องการลบ
-	if current != nil && sl.compare(current.key, key) == 0 {
+	if current != nil && sl.compare(current.Key, key) == 0 {
 		sl.deleteNode(current, update)
 		return true
 	}
@@ -307,47 +310,62 @@ func (sl *SkipList[K, V]) Range(f func(key K, value V) bool) {
 
 	current := sl.header.forward[0]
 	for current != nil {
-		if !f(current.key, current.value) {
+		if !f(current.Key, current.Value) {
 			break
 		}
 		current = current.forward[0]
 	}
 }
 
+// RangeWithIterator provides a locked iterator to a callback function.
+// This is more efficient than creating a new iterator and manually locking,
+// as it acquires a single read lock for the entire duration of the callback's execution.
+// The iterator provided to the callback is only valid within the scope of that callback.
+//
+// RangeWithIterator ให้ Iterator ที่ถูก lock ไปยัง callback function
+// ซึ่งมีประสิทธิภาพสูงกว่าการสร้าง Iterator แล้ว lock ด้วยตนเอง
+// เพราะจะทำการ RLock เพียงครั้งเดียวตลอดการทำงานของ callback
+// Iterator ที่ได้มาจะสามารถใช้งานได้ภายใน callback เท่านั้น
+func (sl *SkipList[K, V]) RangeWithIterator(f func(it *Iterator[K, V])) {
+	sl.mutex.RLock()
+	defer sl.mutex.RUnlock()
+
+	// สร้าง iterator แบบ "unsafe" ที่ไม่ทำการ lock ภายในตัวเอง
+	// เพราะเรา lock จากภายนอกแล้ว
+	it := &Iterator[K, V]{
+		sl:      sl,
+		current: sl.header.forward[0],
+		unsafe:  true,
+	}
+	f(it)
+}
+
 // Min คืนค่า key-value คู่แรก (น้อยที่สุด) ใน skiplist
 // Min returns the first (smallest) key-value pair in the skiplist.
 // It returns the zero values for K and V and false if the skiplist is empty.
 // จะคืนค่า zero values และ false หาก skiplist ว่างเปล่า
-func (sl *SkipList[K, V]) Min() (K, V, bool) {
+func (sl *SkipList[K, V]) Min() (*Node[K, V], bool) {
 	sl.mutex.RLock()
 	defer sl.mutex.RUnlock()
 
 	if sl.length == 0 {
-		var (
-			zeroK K
-			zeroV V
-		)
-		return zeroK, zeroV, false
+		return nil, false
 	}
 
 	firstNode := sl.header.forward[0]
-	return firstNode.key, firstNode.value, true
+	return firstNode, true
 }
 
 // Max คืนค่า key-value คู่สุดท้าย (มากที่สุด) ใน skiplist
 // Max returns the last (largest) key-value pair in the skiplist.
-// It returns the zero values for K and V and false if the skiplist is empty.
-// จะคืนค่า zero values และ false หาก skiplist ว่างเปล่า
-func (sl *SkipList[K, V]) Max() (K, V, bool) {
+// It returns the nil for Node and false if the skiplist is empty.
+// จะคืนค่า nil และ false หาก skiplist ว่างเปล่า
+func (sl *SkipList[K, V]) Max() (*Node[K, V], bool) {
 	sl.mutex.RLock()
 	defer sl.mutex.RUnlock()
 
 	if sl.length == 0 {
-		var (
-			zeroK K
-			zeroV V
-		)
-		return zeroK, zeroV, false
+		return nil, false
 	}
 
 	current := sl.header
@@ -358,7 +376,7 @@ func (sl *SkipList[K, V]) Max() (K, V, bool) {
 		}
 	}
 
-	return current.key, current.value, true
+	return current, true
 }
 
 // RangeQuery วนลูปไปตามรายการที่ key อยู่ระหว่าง start และ end (รวมทั้งสองค่า)
@@ -374,7 +392,7 @@ func (sl *SkipList[K, V]) RangeQuery(start, end K, f func(key K, value V) bool) 
 	// ใช้ตรรกะเดียวกับการค้นหาปกติเพื่อไปยังตำแหน่งที่ถูกต้องในเวลา O(log N)
 	current := sl.header
 	for i := sl.level; i >= 0; i-- {
-		for current.forward[i] != nil && sl.compare(current.forward[i].key, start) < 0 {
+		for current.forward[i] != nil && sl.compare(current.forward[i].Key, start) < 0 {
 			current = current.forward[i]
 		}
 	}
@@ -382,9 +400,9 @@ func (sl *SkipList[K, V]) RangeQuery(start, end K, f func(key K, value V) bool) 
 	current = current.forward[0]
 
 	// 2. วนลูปไปข้างหน้าจนกว่า key จะเกินค่า end
-	for current != nil && sl.compare(current.key, end) <= 0 {
+	for current != nil && sl.compare(current.Key, end) <= 0 {
 		// เรียกใช้ callback function และหยุดถ้ามันคืนค่า false
-		if !f(current.key, current.value) {
+		if !f(current.Key, current.Value) {
 			break
 		}
 		// ไปยังโหนดถัดไปในชั้นล่างสุด
@@ -398,7 +416,7 @@ func (sl *SkipList[K, V]) RangeQuery(start, end K, f func(key K, value V) bool) 
 // It returns the key, value, and true if found, otherwise it returns zero values and false.
 // Predecessor คือโหนดที่มี key มากที่สุดที่น้อยกว่า key ที่กำหนด
 // คืนค่า key, value และ true หากพบ, มิฉะนั้นคืนค่า zero values และ false
-func (sl *SkipList[K, V]) Predecessor(key K) (K, V, bool) {
+func (sl *SkipList[K, V]) Predecessor(key K) (*Node[K, V], bool) {
 	sl.mutex.RLock()
 	defer sl.mutex.RUnlock()
 
@@ -408,7 +426,7 @@ func (sl *SkipList[K, V]) Predecessor(key K) (K, V, bool) {
 	// วิ่งไปข้างหน้าในแต่ละชั้นจนกว่าโหนดถัดไปจะมี key มากกว่าหรือเท่ากับ key ที่ค้นหา
 	// หรือเป็น nil
 	for i := sl.level; i >= 0; i-- {
-		for current.forward[i] != nil && sl.compare(current.forward[i].key, key) < 0 {
+		for current.forward[i] != nil && sl.compare(current.forward[i].Key, key) < 0 {
 			current = current.forward[i]
 		}
 	}
@@ -417,11 +435,10 @@ func (sl *SkipList[K, V]) Predecessor(key K) (K, V, bool) {
 	// และเป็นโหนดที่ใกล้เคียงที่สุด (มากที่สุด) ที่น้อยกว่า 'key'
 	// ถ้า 'current' ยังคงเป็น header แสดงว่าไม่มีโหนดข้อมูลใดๆ ที่มี key น้อยกว่า 'key'
 	if current != sl.header {
-		return current.key, current.value, true
+		return current, true
 	}
-	var zeroK K
-	var zeroV V
-	return zeroK, zeroV, false
+
+	return nil, false
 }
 
 // CountRange นับจำนวนรายการที่ key อยู่ระหว่าง start และ end (รวมทั้งสองค่า)
@@ -440,14 +457,14 @@ func (sl *SkipList[K, V]) CountRange(start, end K) int {
 
 	// 1. ค้นหาโหนดเริ่มต้น (โหนดแรกที่มี key >= start)
 	for i := sl.level; i >= 0; i-- {
-		for current.forward[i] != nil && sl.compare(current.forward[i].key, start) < 0 {
+		for current.forward[i] != nil && sl.compare(current.forward[i].Key, start) < 0 {
 			current = current.forward[i]
 		}
 	}
 	current = current.forward[0] // Move to the first node that might be in range
 
 	// 2. วนลูปไปข้างหน้าจนกว่า key จะเกินค่า end
-	for current != nil && sl.compare(current.key, end) <= 0 {
+	for current != nil && sl.compare(current.Key, end) <= 0 {
 		count++
 		current = current.forward[0]
 	}
@@ -461,7 +478,7 @@ func (sl *SkipList[K, V]) CountRange(start, end K) int {
 // It returns the key, value, and true if found, otherwise it returns zero values and false.
 // Successor คือโหนดที่มี key น้อยที่สุดที่มากกว่า key ที่กำหนด
 // คืนค่า key, value และ true หากพบ, มิฉะนั้นคืนค่า zero values และ false
-func (sl *SkipList[K, V]) Successor(key K) (K, V, bool) {
+func (sl *SkipList[K, V]) Successor(key K) (*Node[K, V], bool) {
 	sl.mutex.RLock()
 	defer sl.mutex.RUnlock()
 
@@ -471,7 +488,7 @@ func (sl *SkipList[K, V]) Successor(key K) (K, V, bool) {
 	// วิ่งไปข้างหน้าในแต่ละชั้นจนกว่าโหนดถัดไปจะมี key มากกว่า key ที่ค้นหา
 	// หรือเป็น nil
 	for i := sl.level; i >= 0; i-- {
-		for current.forward[i] != nil && sl.compare(current.forward[i].key, key) <= 0 {
+		for current.forward[i] != nil && sl.compare(current.forward[i].Key, key) <= 0 {
 			current = current.forward[i]
 		}
 	}
@@ -479,33 +496,28 @@ func (sl *SkipList[K, V]) Successor(key K) (K, V, bool) {
 	// หลังจากลูปสิ้นสุด, 'current' คือโหนดที่มี key น้อยกว่าหรือเท่ากับ 'key'
 	// โหนดถัดไปในชั้นล่างสุด (forward[0]) คือ successor ที่เราต้องการ
 	if current != nil && current.forward[0] != nil {
-		return current.forward[0].key, current.forward[0].value, true
+		return current.forward[0], true
 	}
-	var zeroK K
-	var zeroV V
-	return zeroK, zeroV, false
+	return nil, false
 }
 
 // PopMin ดึง key-value คู่ที่มี key น้อยที่สุดออกจาก skiplist และลบโหนดนั้นออก
 // PopMin removes and returns the smallest key-value pair from the skiplist.
 // It returns the key, value, and true if an item was popped, otherwise it returns zero values and false.
 // คืนค่า key, value และ true หากมีรายการ, มิฉะนั้นคืนค่า zero values และ false
-func (sl *SkipList[K, V]) PopMin() (K, V, bool) {
+func (sl *SkipList[K, V]) PopMin() (*Node[K, V], bool) {
 	sl.mutex.Lock() // ใช้ Lock เพราะมีการแก้ไขโครงสร้าง
 	defer sl.mutex.Unlock()
 
 	if sl.length == 0 {
-		var (
-			zeroK K
-			zeroV V
-		)
-		return zeroK, zeroV, false
+		return nil, false
 	}
 
 	// โหนดที่มี key น้อยที่สุดคือโหนดแรกในชั้น 0
+	// ดึง Key และ Value ออกมาก่อนที่โหนดจะถูกเคลียร์โดย deleteNode
 	nodeToRemove := sl.header.forward[0]
-	key := nodeToRemove.key
-	value := nodeToRemove.value
+	poppedKey := nodeToRemove.Key
+	poppedValue := nodeToRemove.Value
 
 	// สำหรับ PopMin, 'update' path คือ header ในทุกชั้น
 	update := sl.updateCache
@@ -514,23 +526,19 @@ func (sl *SkipList[K, V]) PopMin() (K, V, bool) {
 	}
 
 	sl.deleteNode(nodeToRemove, update)
-	return key, value, true
+	return &Node[K, V]{Key: poppedKey, Value: poppedValue}, true
 }
 
 // PopMax ดึง key-value คู่ที่มี key มากที่สุดออกจาก skiplist และลบโหนดนั้นออก
 // PopMax removes and returns the largest key-value pair from the skiplist.
 // It returns the key, value, and true if an item was popped, otherwise it returns zero values and false.
 // คืนค่า key, value และ true หากมีรายการ, มิฉะนั้นคืนค่า zero values และ false
-func (sl *SkipList[K, V]) PopMax() (K, V, bool) {
+func (sl *SkipList[K, V]) PopMax() (*Node[K, V], bool) {
 	sl.mutex.Lock() // ใช้ Lock เพราะมีการแก้ไขโครงสร้าง
 	defer sl.mutex.Unlock()
 
 	if sl.length == 0 {
-		var (
-			zeroK K
-			zeroV V
-		)
-		return zeroK, zeroV, false
+		return nil, false
 	}
 
 	// ค้นหาโหนดที่อยู่ก่อนหน้าโหนดสุดท้าย (Max) ในแต่ละชั้น
@@ -545,11 +553,11 @@ func (sl *SkipList[K, V]) PopMax() (K, V, bool) {
 	}
 
 	// nodeToRemove คือโหนดที่อยู่ถัดจาก predecessor ในชั้นล่างสุด (ซึ่งก็คือโหนดสุดท้าย)
+	// ดึง Key และ Value ออกมาก่อนที่โหนดจะถูกเคลียร์โดย deleteNode
 	nodeToRemove := update[0].forward[0]
-
-	key := nodeToRemove.key     // This might panic if nodeToRemove is nil
-	value := nodeToRemove.value // This might panic if nodeToRemove is nil
+	poppedKey := nodeToRemove.Key
+	poppedValue := nodeToRemove.Value
 
 	sl.deleteNode(nodeToRemove, update)
-	return key, value, true
+	return &Node[K, V]{Key: poppedKey, Value: poppedValue}, true
 }

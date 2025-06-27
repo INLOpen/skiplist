@@ -10,7 +10,7 @@ import (
 func TestSkipList(t *testing.T) {
 	// --- ทดสอบ Min/Max กับ list ว่าง ---
 	emptySl := New[int, string]()
-	if _, _, ok := emptySl.Min(); ok {
+	if _, ok := emptySl.Min(); ok {
 		t.Error("Min() on empty list should return ok=false")
 	}
 
@@ -28,9 +28,9 @@ func TestSkipList(t *testing.T) {
 	}
 
 	// --- ทดสอบ Search ---
-	val, ok := sl.Search(15)
-	if !ok || val != "fifteen" {
-		t.Errorf("Search(15): expected 'fifteen', got '%s'", val)
+	node, ok := sl.Search(15) // Search now returns *Node[K,V], bool
+	if !ok || node.Value != "fifteen" {
+		t.Errorf("Search(15): expected 'fifteen', got '%s'", node.Value)
 	}
 
 	_, ok = sl.Search(99)
@@ -40,26 +40,26 @@ func TestSkipList(t *testing.T) {
 
 	// --- ทดสอบการอัปเดตค่า ---
 	sl.Insert(10, "TEN_UPDATED")
-	val, ok = sl.Search(10)
-	if !ok || val != "TEN_UPDATED" {
-		t.Errorf("Update(10): expected 'TEN_UPDATED', got '%s'", val)
+	node, ok = sl.Search(10)
+	if !ok || node.Value != "TEN_UPDATED" { // 'node' is from Search(10)
+		t.Errorf("Update(10): expected 'TEN_UPDATED', got '%s'", node.Value) // Corrected: use node.Value
 	}
 	if sl.Len() != 4 {
 		t.Errorf("Expected length 4 after update, but got %d", sl.Len())
 	}
 
 	// --- ทดสอบ Min และ Max ---
-	minKey, minVal, ok := sl.Min()
-	if !ok || minKey != 5 || minVal != "five" {
-		t.Errorf("Min(): expected (5, 'five'), got (%v, '%v')", minKey, minVal)
+	minNode, ok := sl.Min()
+	if !ok || minNode.Key != 5 || minNode.Value != "five" {
+		t.Errorf("Min(): expected (5, 'five'), got (%v, '%v')", minNode.Key, minNode.Value)
 	}
 
-	maxKey, maxVal, ok := sl.Max()
-	if !ok || maxKey != 20 || maxVal != "twenty" {
-		t.Errorf("Max(): expected (20, 'twenty'), got (%v, '%v')", maxKey, maxVal)
+	maxNode, ok := sl.Max()
+	if !ok || maxNode.Key != 20 || maxNode.Value != "twenty" {
+		t.Errorf("Max(): expected (20, 'twenty'), got (%v, '%v')", maxNode.Key, maxNode.Value)
 	}
 
-	if _, _, ok := emptySl.Max(); ok {
+	if _, ok := emptySl.Max(); ok {
 		t.Error("Max() on empty list should return ok=false")
 	}
 
@@ -76,9 +76,9 @@ func TestSkipList(t *testing.T) {
 		t.Error("Search(5): expected not found after delete, but was found")
 	}
 	// ตรวจสอบ Min อีกครั้งหลังลบ
-	minKey, minVal, ok = sl.Min()
-	if !ok || minKey != 10 || minVal != "TEN_UPDATED" {
-		t.Errorf("Min() after delete: expected (10, 'TEN_UPDATED'), got (%v, '%v')", minKey, minVal)
+	minNode, ok = sl.Min()
+	if !ok || minNode.Key != 10 || minNode.Value != "TEN_UPDATED" {
+		t.Errorf("Min() after delete: expected (10, 'TEN_UPDATED'), got (%v, '%v')", minNode.Key, minNode.Value)
 	}
 
 	deleted = sl.Delete(100)
@@ -90,7 +90,7 @@ func TestSkipList(t *testing.T) {
 	fmt.Println("--- Items in SkipList (sorted by key) ---")
 	var keys []int
 	sl.Range(func(key int, value string) bool {
-		fmt.Printf("Key: %d, Value: %s\n", key, value)
+		fmt.Printf("Key: %d, Value: %s\n", key, value) // Corrected: use 'key' and 'value' from Range callback
 		keys = append(keys, key)
 		return true // คืนค่า true เพื่อวนลูปต่อไป
 	})
@@ -252,7 +252,7 @@ func TestSkipList_Predecessor(t *testing.T) {
 	sl := New[int, string]()
 
 	// Test on empty list
-	_, _, ok := sl.Predecessor(10)
+	_, ok := sl.Predecessor(10)
 	if ok {
 		t.Error("Predecessor on empty list should return false")
 	}
@@ -264,50 +264,50 @@ func TestSkipList_Predecessor(t *testing.T) {
 	sl.Insert(50, "fifty")
 
 	// Test key that exists
-	key, val, ok := sl.Predecessor(30)
-	if !ok || key != 20 || val != "twenty" {
-		t.Errorf("Predecessor(30): Expected (20, 'twenty'), got (%v, '%v', %v)", key, val, ok)
+	node, ok := sl.Predecessor(30)
+	if !ok || node.Key != 20 || node.Value != "twenty" {
+		t.Errorf("Predecessor(30): Expected (20, 'twenty'), got (%v, '%v', %v)", node.Key, node.Value, ok)
 	}
 
 	// Test key that does not exist, but has a predecessor
-	key, val, ok = sl.Predecessor(25)
-	if !ok || key != 20 || val != "twenty" {
-		t.Errorf("Predecessor(25): Expected (20, 'twenty'), got (%v, '%v', %v)", key, val, ok)
+	node, ok = sl.Predecessor(25)
+	if !ok || node.Key != 20 || node.Value != "twenty" {
+		t.Errorf("Predecessor(25): Expected (20, 'twenty'), got (%v, '%v', %v)", node.Key, node.Value, ok)
 	}
 
 	// Test key that is the smallest in the list
-	key, val, ok = sl.Predecessor(10)
+	node, ok = sl.Predecessor(10)
 	if ok { // No predecessor for the smallest element
-		t.Errorf("Predecessor(10): Expected no predecessor, got (%v, '%v', %v)", key, val, ok)
+		t.Errorf("Predecessor(10): Expected no predecessor, got (%v, '%v', %v)", node.Key, node.Value, ok)
 	}
 
 	// Test key smaller than the smallest element
-	key, val, ok = sl.Predecessor(5)
+	node, ok = sl.Predecessor(5)
 	if ok { // No predecessor for a key smaller than the smallest element
-		t.Errorf("Predecessor(5): Expected no predecessor, got (%v, '%v', %v)", key, val, ok)
+		t.Errorf("Predecessor(5): Expected no predecessor, got (%v, '%v', %v)", node.Key, node.Value, ok)
 	}
 
 	// Test key that is the largest in the list
-	key, val, ok = sl.Predecessor(50)
-	if !ok || key != 40 || val != "forty" {
-		t.Errorf("Predecessor(50): Expected (40, 'forty'), got (%v, '%v', %v)", key, val, ok)
+	node, ok = sl.Predecessor(50)
+	if !ok || node.Key != 40 || node.Value != "forty" {
+		t.Errorf("Predecessor(50): Expected (40, 'forty'), got (%v, '%v', %v)", node.Key, node.Value, ok)
 	}
 
 	// Test key larger than the largest element
-	key, val, ok = sl.Predecessor(55)
-	if !ok || key != 50 || val != "fifty" {
-		t.Errorf("Predecessor(55): Expected (50, 'fifty'), got (%v, '%v', %v)", key, val, ok)
+	node, ok = sl.Predecessor(55)
+	if !ok || node.Key != 50 || node.Value != "fifty" {
+		t.Errorf("Predecessor(55): Expected (50, 'fifty'), got (%v, '%v', %v)", node.Key, node.Value, ok)
 	}
 
 	// Test after deletion
 	sl.Delete(30)
-	key, val, ok = sl.Predecessor(40)
-	if !ok || key != 20 || val != "twenty" {
-		t.Errorf("Predecessor(40) after deleting 30: Expected (20, 'twenty'), got (%v, '%v', %v)", key, val, ok)
+	node, ok = sl.Predecessor(40)
+	if !ok || node.Key != 20 || node.Value != "twenty" {
+		t.Errorf("Predecessor(40) after deleting 30: Expected (20, 'twenty'), got (%v, '%v', %v)", node.Key, node.Value, ok)
 	}
-	key, val, ok = sl.Predecessor(35) // Key that was between 30 and 40
-	if !ok || key != 20 || val != "twenty" {
-		t.Errorf("Predecessor(35) after deleting 30: Expected (20, 'twenty'), got (%v, '%v', %v)", key, val, ok)
+	node, ok = sl.Predecessor(35) // Key that was between 30 and 40
+	if !ok || node.Key != 20 || node.Value != "twenty" {
+		t.Errorf("Predecessor(35) after deleting 30: Expected (20, 'twenty'), got (%v, '%v', %v)", node.Key, node.Value, ok)
 	}
 }
 
@@ -315,7 +315,7 @@ func TestSkipList_Successor(t *testing.T) {
 	sl := New[int, string]()
 
 	// Test on empty list
-	_, _, ok := sl.Successor(10)
+	_, ok := sl.Successor(10)
 	if ok {
 		t.Error("Successor on empty list should return false")
 	}
@@ -327,50 +327,50 @@ func TestSkipList_Successor(t *testing.T) {
 	sl.Insert(50, "fifty")
 
 	// Test key that exists
-	key, val, ok := sl.Successor(30)
-	if !ok || key != 40 || val != "forty" {
-		t.Errorf("Successor(30): Expected (40, 'forty'), got (%v, '%v', %v)", key, val, ok)
+	node, ok := sl.Successor(30)
+	if !ok || node.Key != 40 || node.Value != "forty" {
+		t.Errorf("Successor(30): Expected (40, 'forty'), got (%v, '%v', %v)", node.Key, node.Value, ok)
 	}
 
 	// Test key that does not exist, but has a successor
-	key, val, ok = sl.Successor(25)
-	if !ok || key != 30 || val != "thirty" {
-		t.Errorf("Successor(25): Expected (30, 'thirty'), got (%v, '%v', %v)", key, val, ok)
+	node, ok = sl.Successor(25)
+	if !ok || node.Key != 30 || node.Value != "thirty" {
+		t.Errorf("Successor(25): Expected (30, 'thirty'), got (%v, '%v', %v)", node.Key, node.Value, ok)
 	}
 
 	// Test key that is the largest in the list
-	key, val, ok = sl.Successor(50)
+	node, ok = sl.Successor(50)
 	if ok { // No successor for the largest element
-		t.Errorf("Successor(50): Expected no successor, got (%v, '%v', %v)", key, val, ok)
+		t.Errorf("Successor(50): Expected no successor, got (%v, '%v', %v)", node.Key, node.Value, ok)
 	}
 
 	// Test key larger than the largest element
-	key, val, ok = sl.Successor(55)
+	node, ok = sl.Successor(55)
 	if ok { // No successor for a key larger than the largest element
-		t.Errorf("Successor(55): Expected no successor, got (%v, '%v', %v)", key, val, ok)
+		t.Errorf("Successor(55): Expected no successor, got (%v, '%v', %v)", node.Key, node.Value, ok)
 	}
 
 	// Test key that is the smallest in the list
-	key, val, ok = sl.Successor(10)
-	if !ok || key != 20 || val != "twenty" {
-		t.Errorf("Successor(10): Expected (20, 'twenty'), got (%v, '%v', %v)", key, val, ok)
+	node, ok = sl.Successor(10)
+	if !ok || node.Key != 20 || node.Value != "twenty" {
+		t.Errorf("Successor(10): Expected (20, 'twenty'), got (%v, '%v', %v)", node.Key, node.Value, ok)
 	}
 
 	// Test key smaller than the smallest element
-	key, val, ok = sl.Successor(5)
-	if !ok || key != 10 || val != "ten" {
-		t.Errorf("Successor(5): Expected (10, 'ten'), got (%v, '%v', %v)", key, val, ok)
+	node, ok = sl.Successor(5)
+	if !ok || node.Key != 10 || node.Value != "ten" {
+		t.Errorf("Successor(5): Expected (10, 'ten'), got (%v, '%v', %v)", node.Key, node.Value, ok)
 	}
 
 	// Test after deletion
 	sl.Delete(30)
-	key, val, ok = sl.Successor(20)
-	if !ok || key != 40 || val != "forty" {
-		t.Errorf("Successor(20) after deleting 30: Expected (40, 'forty'), got (%v, '%v', %v)", key, val, ok)
+	node, ok = sl.Successor(20)
+	if !ok || node.Key != 40 || node.Value != "forty" {
+		t.Errorf("Successor(20) after deleting 30: Expected (40, 'forty'), got (%v, '%v', %v)", node.Key, node.Value, ok)
 	}
-	key, val, ok = sl.Successor(35) // Key that was between 30 and 40
-	if !ok || key != 40 || val != "forty" {
-		t.Errorf("Successor(35) after deleting 30: Expected (40, 'forty'), got (%v, '%v', %v)", key, val, ok)
+	node, ok = sl.Successor(35) // Key that was between 30 and 40
+	if !ok || node.Key != 40 || node.Value != "forty" {
+		t.Errorf("Successor(35) after deleting 30: Expected (40, 'forty'), got (%v, '%v', %v)", node.Key, node.Value, ok)
 	}
 }
 
@@ -419,9 +419,9 @@ func TestSkipList_Insert_NodeReuse(t *testing.T) {
 		sl.Insert(200, "reused-node")
 
 		// 4. ตรวจสอบว่าการ insert สำเร็จ
-		val, ok := sl.Search(200)
-		if !ok || val != "reused-node" {
-			t.Errorf("Expected to find key 200 with value 'reused-node', but got ok=%v, val='%s'", ok, val)
+		node, ok := sl.Search(200)
+		if !ok || node.Value != "reused-node" {
+			t.Errorf("Expected to find key 200 with value 'reused-node', but got ok=%v, val='%s'", ok, node.Value)
 		}
 	})
 }
@@ -430,7 +430,7 @@ func TestSkipList_PopMin(t *testing.T) {
 	sl := New[int, string]()
 
 	// Test on empty list
-	_, _, ok := sl.PopMin()
+	_, ok := sl.PopMin()
 	if ok {
 		t.Error("PopMin on empty list should return false")
 	}
@@ -440,9 +440,9 @@ func TestSkipList_PopMin(t *testing.T) {
 	sl.Insert(20, "twenty")
 
 	// Pop the smallest
-	key, val, ok := sl.PopMin()
-	if !ok || key != 10 || val != "ten" {
-		t.Errorf("PopMin: Expected (10, 'ten'), got (%v, '%v', %v)", key, val, ok)
+	node, ok := sl.PopMin()
+	if !ok || node.Key != 10 || node.Value != "ten" {
+		t.Errorf("PopMin: Expected (10, 'ten'), got (%v, '%v', %v)", node.Key, node.Value, ok)
 	}
 	if sl.Len() != 2 {
 		t.Errorf("Expected length 2 after PopMin, got %d", sl.Len())
@@ -453,25 +453,25 @@ func TestSkipList_PopMin(t *testing.T) {
 	}
 
 	// Pop the next smallest
-	key, val, ok = sl.PopMin()
-	if !ok || key != 20 || val != "twenty" {
-		t.Errorf("PopMin: Expected (20, 'twenty'), got (%v, '%v', %v)", key, val, ok)
+	node, ok = sl.PopMin()
+	if !ok || node.Key != 20 || node.Value != "twenty" {
+		t.Errorf("PopMin: Expected (20, 'twenty'), got (%v, '%v', %v)", node.Key, node.Value, ok)
 	}
 	if sl.Len() != 1 {
 		t.Errorf("Expected length 1 after PopMin, got %d", sl.Len())
 	}
 
 	// Pop the last one
-	key, val, ok = sl.PopMin()
-	if !ok || key != 30 || val != "thirty" {
-		t.Errorf("PopMin: Expected (30, 'thirty'), got (%v, '%v', %v)", key, val, ok)
+	node, ok = sl.PopMin()
+	if !ok || node.Key != 30 || node.Value != "thirty" {
+		t.Errorf("PopMin: Expected (30, 'thirty'), got (%v, '%v', %v)", node.Key, node.Value, ok)
 	}
 	if sl.Len() != 0 {
 		t.Errorf("Expected length 0 after PopMin, got %d", sl.Len())
 	}
 
 	// Test on empty list again
-	_, _, ok = sl.PopMin()
+	_, ok = sl.PopMin()
 	if ok {
 		t.Error("PopMin on empty list after all elements popped should return false")
 	}
@@ -481,7 +481,7 @@ func TestSkipList_PopMax(t *testing.T) {
 	sl := New[int, string]()
 
 	// Test on empty list
-	_, _, ok := sl.PopMax()
+	_, ok := sl.PopMax()
 	if ok {
 		t.Error("PopMax on empty list should return false")
 	}
@@ -491,9 +491,9 @@ func TestSkipList_PopMax(t *testing.T) {
 	sl.Insert(20, "twenty")
 
 	// Pop the largest
-	key, val, ok := sl.PopMax()
-	if !ok || key != 30 || val != "thirty" {
-		t.Errorf("PopMax: Expected (30, 'thirty'), got (%v, '%v', %v)", key, val, ok)
+	node, ok := sl.PopMax()
+	if !ok || node.Key != 30 || node.Value != "thirty" {
+		t.Errorf("PopMax: Expected (30, 'thirty'), got (%v, '%v', %v)", node.Key, node.Value, ok)
 	}
 	if sl.Len() != 2 {
 		t.Errorf("Expected length 2 after PopMax, got %d", sl.Len())
@@ -504,25 +504,25 @@ func TestSkipList_PopMax(t *testing.T) {
 	}
 
 	// Pop the next largest
-	key, val, ok = sl.PopMax()
-	if !ok || key != 20 || val != "twenty" {
-		t.Errorf("PopMax: Expected (20, 'twenty'), got (%v, '%v', %v)", key, val, ok)
+	node, ok = sl.PopMax()
+	if !ok || node.Key != 20 || node.Value != "twenty" {
+		t.Errorf("PopMax: Expected (20, 'twenty'), got (%v, '%v', %v)", node.Key, node.Value, ok)
 	}
 	if sl.Len() != 1 {
 		t.Errorf("Expected length 1 after PopMax, got %d", sl.Len())
 	}
 
 	// Pop the last one
-	key, val, ok = sl.PopMax()
-	if !ok || key != 10 || val != "ten" {
-		t.Errorf("PopMax: Expected (10, 'ten'), got (%v, '%v', %v)", key, val, ok)
+	node, ok = sl.PopMax()
+	if !ok || node.Key != 10 || node.Value != "ten" {
+		t.Errorf("PopMax: Expected (10, 'ten'), got (%v, '%v', %v)", node.Key, node.Value, ok)
 	}
 	if sl.Len() != 0 {
 		t.Errorf("Expected length 0 after PopMax, got %d", sl.Len())
 	}
 
 	// Test on empty list again
-	_, _, ok = sl.PopMax()
+	_, ok = sl.PopMax()
 	if ok {
 		t.Error("PopMax on empty list after all elements popped should return false")
 	}
@@ -652,6 +652,72 @@ func TestSkipList_Iterator(t *testing.T) {
 		it.Seek(55) // Should be invalid
 		if it.Valid() {
 			t.Errorf("Seek(55) failed: Expected invalid iterator, got key %v", it.Key())
+		}
+	})
+}
+
+func TestSkipList_RangeWithIterator(t *testing.T) {
+	sl := New[int, string]()
+	sl.Insert(10, "ten")
+	sl.Insert(30, "thirty")
+	sl.Insert(20, "twenty")
+	sl.Insert(50, "fifty")
+	sl.Insert(40, "forty")
+
+	t.Run("Iterate all elements", func(t *testing.T) {
+		var collectedKeys []int
+		expectedKeys := []int{10, 20, 30, 40, 50}
+
+		sl.RangeWithIterator(func(it *Iterator[int, string]) {
+			for it.Valid() {
+				collectedKeys = append(collectedKeys, it.Key())
+				it.Next()
+			}
+		})
+
+		if len(collectedKeys) != len(expectedKeys) {
+			t.Fatalf("Expected %d keys, got %d. Keys: %v", len(expectedKeys), len(collectedKeys), collectedKeys)
+		}
+		for i, k := range collectedKeys {
+			if k != expectedKeys[i] {
+				t.Errorf("Expected key %d at index %d, got %d", expectedKeys[i], i, k)
+			}
+		}
+	})
+
+	t.Run("Seek and iterate", func(t *testing.T) {
+		var collectedKeys []int
+		expectedKeys := []int{30, 40, 50}
+
+		sl.RangeWithIterator(func(it *Iterator[int, string]) {
+			it.Seek(25) // Should land on 30
+			for it.Valid() {
+				collectedKeys = append(collectedKeys, it.Key())
+				it.Next()
+			}
+		})
+
+		if len(collectedKeys) != len(expectedKeys) {
+			t.Fatalf("Seek: Expected %d keys, got %d. Keys: %v", len(expectedKeys), len(collectedKeys), collectedKeys)
+		}
+		for i, k := range collectedKeys {
+			if k != expectedKeys[i] {
+				t.Errorf("Seek: Expected key %d at index %d, got %d", expectedKeys[i], i, k)
+			}
+		}
+	})
+
+	t.Run("Empty list", func(t *testing.T) {
+		emptySl := New[int, string]()
+		var count int
+		emptySl.RangeWithIterator(func(it *Iterator[int, string]) {
+			if it.Valid() {
+				t.Error("Iterator on empty list should not be valid")
+			}
+			count++
+		})
+		if count != 1 {
+			t.Error("Callback should be called exactly once on an empty list")
 		}
 	})
 }
