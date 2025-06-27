@@ -655,3 +655,69 @@ func TestSkipList_Iterator(t *testing.T) {
 		}
 	})
 }
+
+func TestSkipList_RangeWithIterator(t *testing.T) {
+	sl := New[int, string]()
+	sl.Insert(10, "ten")
+	sl.Insert(30, "thirty")
+	sl.Insert(20, "twenty")
+	sl.Insert(50, "fifty")
+	sl.Insert(40, "forty")
+
+	t.Run("Iterate all elements", func(t *testing.T) {
+		var collectedKeys []int
+		expectedKeys := []int{10, 20, 30, 40, 50}
+
+		sl.RangeWithIterator(func(it *Iterator[int, string]) {
+			for it.Valid() {
+				collectedKeys = append(collectedKeys, it.Key())
+				it.Next()
+			}
+		})
+
+		if len(collectedKeys) != len(expectedKeys) {
+			t.Fatalf("Expected %d keys, got %d. Keys: %v", len(expectedKeys), len(collectedKeys), collectedKeys)
+		}
+		for i, k := range collectedKeys {
+			if k != expectedKeys[i] {
+				t.Errorf("Expected key %d at index %d, got %d", expectedKeys[i], i, k)
+			}
+		}
+	})
+
+	t.Run("Seek and iterate", func(t *testing.T) {
+		var collectedKeys []int
+		expectedKeys := []int{30, 40, 50}
+
+		sl.RangeWithIterator(func(it *Iterator[int, string]) {
+			it.Seek(25) // Should land on 30
+			for it.Valid() {
+				collectedKeys = append(collectedKeys, it.Key())
+				it.Next()
+			}
+		})
+
+		if len(collectedKeys) != len(expectedKeys) {
+			t.Fatalf("Seek: Expected %d keys, got %d. Keys: %v", len(expectedKeys), len(collectedKeys), collectedKeys)
+		}
+		for i, k := range collectedKeys {
+			if k != expectedKeys[i] {
+				t.Errorf("Seek: Expected key %d at index %d, got %d", expectedKeys[i], i, k)
+			}
+		}
+	})
+
+	t.Run("Empty list", func(t *testing.T) {
+		emptySl := New[int, string]()
+		var count int
+		emptySl.RangeWithIterator(func(it *Iterator[int, string]) {
+			if it.Valid() {
+				t.Error("Iterator on empty list should not be valid")
+			}
+			count++
+		})
+		if count != 1 {
+			t.Error("Callback should be called exactly once on an empty list")
+		}
+	})
+}
