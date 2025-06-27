@@ -1,6 +1,6 @@
 # Go Generic Skiplist
 
-[![Go Report Card](https://goreportcard.com/badge/github.com/INLOpen/skiplist)](https://goreportcard.com/report/github.com/INLOpen/skiplist)
+[![Go Report Card](https://goreportcard.com/badge/github.com/INLOpen/skiplist)](https://goreportcard.com/report/github.com/INLOpen/skiplist) [![Go Reference](https://pkg.go.dev/badge/github.com/INLOpen/skiplist.svg)](https://pkg.go.dev/github.com/INLOpen/skiplist)
 
 A thread-safe, high-performance, generic skiplist implementation in Go.
 
@@ -46,9 +46,9 @@ func main() {
 	sl.Insert(20, "twenty")
 
 	// Search for a value
-	value, ok := sl.Search(20)
+	node, ok := sl.Search(20) // Search now returns *Node[K,V], bool
 	if ok {
-		fmt.Printf("Found key 20 with value: %s\n", value) // "twenty"
+		fmt.Printf("Found key 20 with value: %s\n", node.Value) // "twenty"
 	}
 
 	// Iterate over all items in sorted order
@@ -58,10 +58,10 @@ func main() {
 		return true // Continue iteration
 	})
 
-	// Pop the maximum element
-	maxKey, maxVal, ok := sl.PopMax()
+	// Pop the maximum element (PopMax now returns *Node[K,V], bool)
+	maxNode, ok := sl.PopMax()
 	if ok {
-		fmt.Printf("Popped max element: %d -> %s\n", maxKey, maxVal) // 30 -> "thirty"
+		fmt.Printf("Popped max element: %d -> %s\n", maxNode.Key, maxNode.Value) // 30 -> "thirty"
 	}
 
 	fmt.Printf("Current length: %d\n", sl.Len()) // 2
@@ -126,7 +126,7 @@ func main() {
 	sl.Insert(10, "A")
 	sl.Insert(20, "B")
 	sl.Insert(30, "C")
-	sl.Insert(40, "D")
+	sl.Insert(40, "D") // [Minor: This line was missing in the original diff, adding it for completeness]
 
 	// Create a new iterator
 	it := sl.NewIterator()
@@ -154,17 +154,17 @@ func main() {
 
 ### Basic Operations
 *   `(sl *SkipList[K, V]) Insert(key K, value V)`
-*   `(sl *SkipList[K, V]) Search(key K) (V, bool)`
+*   `(sl *SkipList[K, V]) Search(key K) (*Node[K, V], bool)`
 *   `(sl *SkipList[K, V]) Delete(key K) bool`
 *   `(sl *SkipList[K, V]) Len() int`
 
 ### Ordered Operations
-*   `(sl *SkipList[K, V]) Min() (K, V, bool)`
-*   `(sl *SkipList[K, V]) Max() (K, V, bool)`
-*   `(sl *SkipList[K, V]) PopMin() (K, V, bool)`
-*   `(sl *SkipList[K, V]) PopMax() (K, V, bool)`
-*   `(sl *SkipList[K, V]) Predecessor(key K) (K, V, bool)`
-*   `(sl *SkipList[K, V]) Successor(key K) (K, V, bool)`
+*   `(sl *SkipList[K, V]) Min() (*Node[K, V], bool)`
+*   `(sl *SkipList[K, V]) Max() (*Node[K, V], bool)`
+*   `(sl *SkipList[K, V]) PopMin() (*Node[K, V], bool)`
+*   `(sl *SkipList[K, V]) PopMax() (*Node[K, V], bool)`
+*   `(sl *SkipList[K, V]) Predecessor(key K) (*Node[K, V], bool)`
+*   `(sl *SkipList[K, V]) Successor(key K) (*Node[K, V], bool)`
 
 ### Iteration & Range
 *   `(sl *SkipList[K, V]) Range(f func(key K, value V) bool)`

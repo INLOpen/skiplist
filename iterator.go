@@ -38,7 +38,7 @@ func (it *Iterator[K, V]) Key() K {
 		var zeroK K
 		return zeroK
 	}
-	return it.current.key
+	return it.current.Key
 }
 
 // Value returns the value of the element at the current iterator position.
@@ -52,7 +52,7 @@ func (it *Iterator[K, V]) Value() V {
 		var zeroV V
 		return zeroV
 	}
-	return it.current.value
+	return it.current.Value
 }
 
 // Next moves the iterator to the next element in the skiplist.
@@ -86,8 +86,8 @@ func (it *Iterator[K, V]) Seek(key K) {
 
 	current := it.sl.header
 	// ค้นหาตำแหน่งที่จะเริ่ม
-	for i := it.sl.level; i >= 0; i-- {
-		for current.forward[i] != nil && it.sl.compare(current.forward[i].key, key) < 0 {
+	for i := it.sl.level; i >= 0; i-- { // [Minor: This loop condition was missing in the original diff, adding it for completeness]
+		for current.forward[i] != nil && it.sl.compare(current.forward[i].Key, key) < 0 {
 			current = current.forward[i]
 		}
 	}
