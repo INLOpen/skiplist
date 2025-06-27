@@ -22,27 +22,31 @@ func generateRandomKeys(n int) []int {
 	return keys
 }
 
-const benchmarkSize = 10000 // Number of items to insert/search/delete
+const benchmarkSize = 10000 // Increase size for more realistic benchmarks
 
+// BenchmarkSkipList_Insert measures the average performance of inserting a single element
+// into a skiplist that is growing from 0 to N elements.
 func BenchmarkSkipList_Insert(b *testing.B) {
-	keys := generateRandomKeys(benchmarkSize)
-	b.ResetTimer()
+	b.StopTimer()
+	keys := generateRandomKeys(b.N)
+	sl := New[int, int]()
+	b.StartTimer()
+
 	for i := 0; i < b.N; i++ {
-		sl := New[int, int]() // สร้าง SkipList ใหม่ในแต่ละ iteration
-		for j := 0; j < benchmarkSize; j++ {
-			sl.Insert(keys[j], j)
-		}
+		sl.Insert(keys[i], i)
 	}
 }
 
+// BenchmarkMap_Insert measures the average performance of inserting a single element
+// into a map that is growing from 0 to N elements.
 func BenchmarkMap_Insert(b *testing.B) {
-	keys := generateRandomKeys(benchmarkSize)
-	b.ResetTimer()
+	b.StopTimer()
+	keys := generateRandomKeys(b.N)
+	m := make(map[int]int, b.N) // Pre-allocate map capacity
+	b.StartTimer()
+
 	for i := 0; i < b.N; i++ {
-		m := make(map[int]int)
-		for j := 0; j < benchmarkSize; j++ {
-			m[keys[j]] = keys[j]
-		}
+		m[keys[i]] = i
 	}
 }
 
@@ -54,7 +58,7 @@ func BenchmarkSkipList_Search(b *testing.B) {
 		sl.Insert(keys[j], keys[j])
 	}
 
-	b.ResetTimer()
+	b.StartTimer() // Use StartTimer after setup is complete
 	for i := 0; i < b.N; i++ {
 		_, _ = sl.Search(keys[i%benchmarkSize]) // Ignore returned node
 	} // b.StartTimer() is implicitly called here
@@ -68,7 +72,7 @@ func BenchmarkMap_Search(b *testing.B) {
 		m[keys[j]] = keys[j]
 	}
 
-	b.ResetTimer()
+	b.StartTimer() // Use StartTimer after setup is complete
 	for i := 0; i < b.N; i++ {
 		_ = m[keys[i%benchmarkSize]]
 	} // b.StartTimer() is implicitly called here
@@ -83,7 +87,7 @@ func BenchmarkSkipList_Delete(b *testing.B) {
 		sl.Insert(keys[j], keys[j])
 	}
 
-	b.ResetTimer()
+	b.StartTimer() // Use StartTimer after setup is complete
 	for i := 0; i < b.N; i++ {
 		sl.Delete(keys[i%benchmarkSize])
 		sl.Insert(keys[i%benchmarkSize], keys[i%benchmarkSize]) // Re-insert to maintain size for next iteration
@@ -98,7 +102,7 @@ func BenchmarkMap_Delete(b *testing.B) {
 		m[keys[j]] = keys[j]
 	}
 
-	b.ResetTimer()
+	b.StartTimer() // Use StartTimer after setup is complete
 	for i := 0; i < b.N; i++ {
 		delete(m, keys[i%benchmarkSize])
 		m[keys[i%benchmarkSize]] = keys[i%benchmarkSize] // Re-insert to maintain size for next iteration
@@ -112,16 +116,16 @@ func BenchmarkMap_Delete(b *testing.B) {
 func BenchmarkSkipList_Insert_SingleOp_Warm(b *testing.B) {
 	sl := New[int, int]() // สร้าง SkipList ใหม่ในแต่ละ iteration
 	// Pre-fill and clear the list to warm up the pool
+	b.StopTimer() // Stop timer for setup
 	warmupKeys := generateRandomKeys(benchmarkSize)
 	for _, key := range warmupKeys {
 		sl.Insert(key, key)
 	}
-	b.StopTimer() // Stop timer for setup
 	for _, key := range warmupKeys {
 		sl.Delete(key)
 	}
 
-	b.ResetTimer()
+	b.StartTimer() // Use StartTimer after setup is complete
 	for i := 0; i < b.N; i++ {
 		sl.Insert(i, i) // Insert a new key (this is the operation being measured)
 		sl.Delete(i)    // Delete it immediately to return node to pool (this is part of the measured cycle)
@@ -139,7 +143,7 @@ func BenchmarkSkipList_Churn(b *testing.B) {
 		sl.Insert(key, key)
 	}
 
-	b.ResetTimer()
+	b.StartTimer() // Use StartTimer after setup is complete
 	for i := 0; i < b.N; i++ {
 		// In each iteration, delete a key and insert a new one.
 		// This simulates a workload where the data set is constantly changing.
@@ -165,8 +169,54 @@ func BenchmarkSkipList_Range(b *testing.B) {
 		sl.Insert(key, key)
 	}
 
-	b.ResetTimer()
+	b.StartTimer() // Use StartTimer after setup is complete
 	for i := 0; i < b.N; i++ {
 		sl.Range(func(key int, value int) bool { return true }) // Iterate through all elements
 	} // b.StartTimer() is implicitly called here
+}
+
+// BenchmarkSkipList_Iterator_Safe measures the performance of iterating through all elements
+// using the standard, thread-safe iterator, which acquires a lock on each operation.
+func BenchmarkSkipList_Iterator_Safe(b *testing.B) {
+	sl := New[int, int]()
+	keys := generateRandomKeys(benchmarkSize)
+	b.StopTimer()
+	for _, key := range keys {
+		sl.Insert(key, key)
+	}
+	b.StartTimer()
+
+	for i := 0; i < b.N; i++ {
+		it := sl.NewIterator()
+		for it.Valid() {
+			// Accessing key and value to simulate a real workload and locking overhead
+			_ = it.Key()
+			_ = it.Value()
+			it.Next()
+		}
+	}
+}
+
+// BenchmarkSkipList_RangeWithIterator measures the performance of iterating through all elements
+// using the more efficient RangeWithIterator method, which holds a single read lock
+// and uses an internal "unsafe" iterator.
+func BenchmarkSkipList_RangeWithIterator(b *testing.B) {
+	sl := New[int, int]()
+	keys := generateRandomKeys(benchmarkSize)
+	b.StopTimer()
+	for _, key := range keys {
+		sl.Insert(key, key)
+	}
+	b.StartTimer()
+
+	for i := 0; i < b.N; i++ {
+		sl.RangeWithIterator(func(it *Iterator[int, int]) {
+			for it.Valid() {
+				// Accessing key and value to simulate a real workload
+				_ = it.Key()
+				_ = it.Value()
+				it.Next()
+			}
+		})
+	}
 }

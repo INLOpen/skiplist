@@ -6,15 +6,17 @@ package skiplist
 type Iterator[K any, V any] struct {
 	sl      *SkipList[K, V] // อ้างอิงถึง Skiplist ที่กำลังวนลูป
 	current *Node[K, V]     // โหนดปัจจุบันที่ Iterator ชี้อยู่
+	unsafe  bool            // ถ้าเป็น true, จะไม่ทำการ lock/unlock (ใช้สำหรับ RangeWithIterator)
 }
 
 // NewIterator creates a new iterator positioned at the first element of the skiplist.
 // NewIterator สร้างและคืนค่า Iterator ใหม่ที่ชี้ไปยังรายการแรกใน Skiplist
 func (sl *SkipList[K, V]) NewIterator() *Iterator[K, V] {
-	// ไม่ต้อง RLock ที่นี่ เพราะเมธอดของ Iterator จะ RLock เอง
+	// สร้าง iterator แบบ thread-safe ปกติ
 	return &Iterator[K, V]{
 		sl:      sl,
 		current: sl.header.forward[0], // เริ่มต้นที่โหนดแรก
+		unsafe:  false,
 	}
 }
 
@@ -22,8 +24,10 @@ func (sl *SkipList[K, V]) NewIterator() *Iterator[K, V] {
 // It returns false if the iterator is exhausted.
 // Valid ตรวจสอบว่า Iterator ชี้ไปยังรายการที่ถูกต้องหรือไม่ (ไม่ใช่ nil)
 func (it *Iterator[K, V]) Valid() bool {
-	it.sl.mutex.RLock()
-	defer it.sl.mutex.RUnlock()
+	if !it.unsafe {
+		it.sl.mutex.RLock()
+		defer it.sl.mutex.RUnlock()
+	}
 	return it.current != nil
 }
 
@@ -32,8 +36,10 @@ func (it *Iterator[K, V]) Valid() bool {
 // Key คืนค่า key ของรายการปัจจุบันที่ Iterator ชี้อยู่
 // หาก Iterator ไม่ Valid จะคืนค่า zero value ของ K
 func (it *Iterator[K, V]) Key() K {
-	it.sl.mutex.RLock()
-	defer it.sl.mutex.RUnlock()
+	if !it.unsafe {
+		it.sl.mutex.RLock()
+		defer it.sl.mutex.RUnlock()
+	}
 	if it.current == nil {
 		var zeroK K
 		return zeroK
@@ -46,8 +52,10 @@ func (it *Iterator[K, V]) Key() K {
 // Value คืนค่า value ของรายการปัจจุบันที่ Iterator ชี้อยู่
 // หาก Iterator ไม่ Valid จะคืนค่า zero value ของ V
 func (it *Iterator[K, V]) Value() V {
-	it.sl.mutex.RLock()
-	defer it.sl.mutex.RUnlock()
+	if !it.unsafe {
+		it.sl.mutex.RLock()
+		defer it.sl.mutex.RUnlock()
+	}
 	if it.current == nil {
 		var zeroV V
 		return zeroV
@@ -60,8 +68,10 @@ func (it *Iterator[K, V]) Value() V {
 // Next เลื่อน Iterator ไปยังรายการถัดไป
 // หาก Iterator ไม่ Valid หรือไม่มีรายการถัดไป จะทำให้ Iterator ไม่ Valid
 func (it *Iterator[K, V]) Next() {
-	it.sl.mutex.RLock()
-	defer it.sl.mutex.RUnlock()
+	if !it.unsafe {
+		it.sl.mutex.RLock()
+		defer it.sl.mutex.RUnlock()
+	}
 	if it.current != nil {
 		it.current = it.current.forward[0]
 	}
@@ -70,8 +80,10 @@ func (it *Iterator[K, V]) Next() {
 // Rewind moves the iterator back to the first element of the skiplist.
 // Rewind เลื่อน Iterator กลับไปยังรายการแรกใน Skiplist
 func (it *Iterator[K, V]) Rewind() {
-	it.sl.mutex.RLock()
-	defer it.sl.mutex.RUnlock()
+	if !it.unsafe {
+		it.sl.mutex.RLock()
+		defer it.sl.mutex.RUnlock()
+	}
 	it.current = it.sl.header.forward[0]
 }
 
@@ -81,8 +93,10 @@ func (it *Iterator[K, V]) Rewind() {
 // หากไม่พบ key ที่ตรงกัน จะเลื่อนไปที่รายการแรกที่มี key มากกว่า key ที่กำหนด
 // หากไม่มีรายการใดๆ ที่ตรงตามเงื่อนไข จะทำให้ Iterator ไม่ Valid
 func (it *Iterator[K, V]) Seek(key K) {
-	it.sl.mutex.RLock()
-	defer it.sl.mutex.RUnlock()
+	if !it.unsafe {
+		it.sl.mutex.RLock()
+		defer it.sl.mutex.RUnlock()
+	}
 
 	current := it.sl.header
 	// ค้นหาตำแหน่งที่จะเริ่ม

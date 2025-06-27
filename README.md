@@ -16,6 +16,35 @@ This library provides a skiplist data structure that is easy to use, highly effi
 *   **✨ Rich API**: Includes a comprehensive set of methods like `RangeQuery`, `PopMin`, `PopMax`, `Predecessor`, `Successor`, and more.
 *   **🚶 Full-Featured Iterator**: Provides a powerful iterator with `Seek`, `Next`, `Rewind`, etc., for flexible data traversal.
 
+## Performance
+
+Benchmarks are run against Go's built-in `map` for comparison. The results show that while `map` is faster for basic unsorted operations, the skiplist offers competitive performance, especially in high-churn scenarios, and provides the unique advantage of ordered data traversal.
+
+*   **`Insert/Search/Delete`**: The native `map` is faster due to its highly optimized hash table implementation. The skiplist has overhead from maintaining sorted order and managing pointers across multiple levels.
+*   **`Insert_SingleOp_Warm`**: This benchmark highlights the power of `sync.Pool`. When nodes are recycled, skiplist insertion performance is excellent, with **zero allocations per operation**, making it ideal for workloads with frequent insertions and deletions.
+*   **`Churn`**: This test (delete one, insert one) further demonstrates the skiplist's efficiency in dynamic datasets where memory reuse is critical.
+*   **Iteration (`Range` vs. `Iterator`)**:
+    *   `Range` and `RangeWithIterator` are the most efficient ways to iterate, holding a single lock for the entire duration.
+    *   The standard `Iterator` (`Iterator_Safe`) is significantly slower because it acquires a lock for *every operation* (`Valid`, `Key`, `Next`), making it safe but less performant for full scans. Use it when you need fine-grained control and cannot hold a lock for the entire loop.
+
+**Conclusion**: Choose this skiplist when you need **sorted data**, **ordered iteration (Range queries)**, or **high performance in high-churn environments** to reduce GC pressure. For simple, unordered key-value storage, the built-in `map` is typically faster.
+
+*Results on `13th Gen Intel(R) Core(TM) i9-13900H` with `benchmarkSize = 10000`*
+
+| Benchmark                               | ns/op      | B/op | allocs/op |
+| --------------------------------------- | ---------- | ---- | --------- |
+| `BenchmarkSkipList_Insert`              | 1931       | 58   | 2         |
+| `BenchmarkMap_Insert`                   | 84.07      | 0    | 0         |
+| `BenchmarkSkipList_Search`              | 228.9      | 0    | 0         |
+| `BenchmarkMap_Search`                   | 20.16      | 0    | 0         |
+| `BenchmarkSkipList_Delete`              | 497.0      | 0    | 0         |
+| `BenchmarkMap_Delete`                   | 51.45      | 0    | 0         |
+| `BenchmarkSkipList_Insert_SingleOp_Warm`| 86.69      | 0    | 0         |
+| `BenchmarkSkipList_Churn`               | 301.3      | 0    | 0         |
+| `BenchmarkSkipList_Range`               | 113397     | 51   | 0         |
+| `BenchmarkSkipList_Iterator_Safe`       | 583459     | 262  | 0         |
+| `BenchmarkSkipList_RangeWithIterator`   | 107438     | 71   | 1         |
+
 ## Installation
 
 ```sh

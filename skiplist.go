@@ -330,9 +330,13 @@ func (sl *SkipList[K, V]) RangeWithIterator(f func(it *Iterator[K, V])) {
 	sl.mutex.RLock()
 	defer sl.mutex.RUnlock()
 
-	// สร้าง iterator ที่ไม่จำเป็นต้อง lock ภายในตัวเอง
+	// สร้าง iterator แบบ "unsafe" ที่ไม่ทำการ lock ภายในตัวเอง
 	// เพราะเรา lock จากภายนอกแล้ว
-	it := &Iterator[K, V]{sl: sl, current: sl.header.forward[0]}
+	it := &Iterator[K, V]{
+		sl:      sl,
+		current: sl.header.forward[0],
+		unsafe:  true,
+	}
 	f(it)
 }
 
