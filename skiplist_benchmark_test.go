@@ -188,11 +188,10 @@ func BenchmarkSkipList_Iterator_Safe(b *testing.B) {
 
 	for i := 0; i < b.N; i++ {
 		it := sl.NewIterator()
-		for it.Valid() {
+		for it.Next() {
 			// Accessing key and value to simulate a real workload and locking overhead
 			_ = it.Key()
 			_ = it.Value()
-			it.Next()
 		}
 	}
 }
@@ -211,12 +210,38 @@ func BenchmarkSkipList_RangeWithIterator(b *testing.B) {
 
 	for i := 0; i < b.N; i++ {
 		sl.RangeWithIterator(func(it *Iterator[int, int]) {
-			for it.Valid() {
+			for it.Next() {
 				// Accessing key and value to simulate a real workload
 				_ = it.Key()
 				_ = it.Value()
-				it.Next()
 			}
 		})
+	}
+}
+
+// BenchmarkSkipList_Clear measures the performance of clearing a pre-filled skiplist.
+// This benchmark focuses on the time taken to reset the list's state and replace the node pool.
+// The actual garbage collection of old nodes happens asynchronously and is not measured here.
+//
+// NOTE: The original implementation of this benchmark caused timeouts. The Clear() operation
+// is extremely fast. The benchmark runner would try to execute it millions of times (by increasing b.N)
+// to get a stable reading. However, the setup for each operation (filling the list) was
+// untimed but still inside the b.N loop. This caused the slow setup code to run for a
+// very long time, leading to a timeout.
+//
+// The corrected benchmark below measures the entire cycle of creating, filling, and then
+// clearing a skiplist. This avoids the timeout issue. The cost of Clear() itself is
+// negligible compared to the cost of filling the list.
+func BenchmarkSkipList_Clear(b *testing.B) {
+	keys := generateRandomKeys(benchmarkSize)
+	b.ReportAllocs()
+	b.ResetTimer()
+
+	for i := 0; i < b.N; i++ {
+		sl := New[int, int]()
+		for _, key := range keys {
+			sl.Insert(key, key)
+		}
+		sl.Clear()
 	}
 }

@@ -25,9 +25,10 @@ const (
 
 // Node คือโหนดแต่ละตัวใน skiplist
 type Node[K any, V any] struct {
-	Key     K
-	Value   V
-	forward []*Node[K, V] // สไลซ์ของตัวชี้ไปยังโหนดถัดไปในแต่ละชั้น
+	Key      K
+	Value    V
+	backward *Node[K, V]   // ตัวชี้ไปยังโหนดก่อนหน้า (เฉพาะชั้น 0)
+	forward  []*Node[K, V] // สไลซ์ของตัวชี้ไปยังโหนดถัดไปในแต่ละชั้น
 }
 
 // nodePool คือ pool สำหรับจัดการหน่วยความจำของ Node
@@ -226,6 +227,13 @@ func (sl *SkipList[K, V]) Insert(key K, value V) *Node[K, V] {
 		update[i].forward[i] = newNode
 	}
 
+	// ตั้งค่า backward pointer สำหรับ doubly-linked list ที่ชั้น 0
+	// Set up backward pointer for the doubly-linked list at level 0
+	newNode.backward = update[0]
+	if newNode.forward[0] != nil {
+		newNode.forward[0].backward = newNode
+	}
+
 	sl.length++
 	return nil
 }
@@ -247,14 +255,20 @@ func (sl *SkipList[K, V]) deleteNode(nodeToRemove *Node[K, V], update []*Node[K,
 		sl.level--
 	}
 
+	// อัปเดต backward pointer ของโหนดถัดไป (ถ้ามี)
+	// Update the backward pointer of the next node, if it exists.
+	if nodeToRemove.forward[0] != nil {
+		nodeToRemove.forward[0].backward = nodeToRemove.backward
+	}
+
 	// คืนโหนดกลับเข้า Pool
 	var zeroK K
 	var zeroV V
-	nodeToRemove.Key = zeroK   // เคลียร์ key
-	nodeToRemove.Value = zeroV // เคลียร์ value
-	for i := range nodeToRemove.forward {
-		nodeToRemove.forward[i] = nil
-	}
+	nodeToRemove.Key = zeroK    // เคลียร์ key
+	nodeToRemove.Value = zeroV  // เคลียร์ value
+	nodeToRemove.backward = nil // เคลียร์ backward pointer
+	// Use clear() for efficiency and conciseness (Go 1.21+)
+	clear(nodeToRemove.forward)
 	sl.pool.p.Put(nodeToRemove)
 
 	sl.length--
@@ -289,6 +303,31 @@ func (sl *SkipList[K, V]) Delete(key K) bool {
 
 	// ไม่พบ key ที่ต้องการลบ
 	return false
+}
+
+// Clear removes all items from the skiplist, resetting it to an empty state.
+// It also replaces the internal node pool, allowing the garbage collector to reclaim
+// memory from the old nodes. This is useful to free up memory after the skiplist
+// is no longer needed, or before reusing it for a different dataset.
+//
+// Clear ลบรายการทั้งหมดออกจาก skiplist และรีเซ็ตให้อยู่ในสถานะว่างเปล่า
+// และยังทำการแทนที่ node pool ภายใน, ทำให้ garbage collector สามารถคืนหน่วยความจำ
+// จากโหนดเก่าได้. มีประโยชน์ในการคืนหน่วยความจำหลังจากที่ skiplist ไม่ได้ใช้งานแล้ว
+// หรือก่อนที่จะนำไปใช้กับข้อมูลชุดใหม่
+func (sl *SkipList[K, V]) Clear() {
+	sl.mutex.Lock()
+	defer sl.mutex.Unlock()
+
+	// Reset the skiplist's structural properties
+	sl.level = 0
+	sl.length = 0
+	for i := range sl.header.forward {
+		sl.header.forward[i] = nil
+	}
+
+	// Replace the node pool with a new one.
+	// The old pool and its contained nodes will be garbage collected.
+	sl.pool = newNodePool[K, V]()
 }
 
 // Len คืนค่าจำนวนรายการทั้งหมดใน skiplist
@@ -334,7 +373,7 @@ func (sl *SkipList[K, V]) RangeWithIterator(f func(it *Iterator[K, V])) {
 	// เพราะเรา lock จากภายนอกแล้ว
 	it := &Iterator[K, V]{
 		sl:      sl,
-		current: sl.header.forward[0],
+		current: sl.header, // เริ่มต้นที่ header เพื่อให้ it.Next() ทำงานถูกต้อง
 		unsafe:  true,
 	}
 	f(it)
@@ -426,6 +465,8 @@ func (sl *SkipList[K, V]) Predecessor(key K) (*Node[K, V], bool) {
 	// วิ่งไปข้างหน้าในแต่ละชั้นจนกว่าโหนดถัดไปจะมี key มากกว่าหรือเท่ากับ key ที่ค้นหา
 	// หรือเป็น nil
 	for i := sl.level; i >= 0; i-- {
+		// The key difference for Predecessor is the strict inequality '<'.
+		// We stop *before* we reach a node with a key equal to or greater than the target.
 		for current.forward[i] != nil && sl.compare(current.forward[i].Key, key) < 0 {
 			current = current.forward[i]
 		}
@@ -488,6 +529,8 @@ func (sl *SkipList[K, V]) Successor(key K) (*Node[K, V], bool) {
 	// วิ่งไปข้างหน้าในแต่ละชั้นจนกว่าโหนดถัดไปจะมี key มากกว่า key ที่ค้นหา
 	// หรือเป็น nil
 	for i := sl.level; i >= 0; i-- {
+		// The key difference for Successor is the non-strict inequality '<='.
+		// We advance *past* any node with a key equal to the target.
 		for current.forward[i] != nil && sl.compare(current.forward[i].Key, key) <= 0 {
 			current = current.forward[i]
 		}
@@ -545,7 +588,10 @@ func (sl *SkipList[K, V]) PopMax() (*Node[K, V], bool) {
 	update := sl.updateCache
 	current := sl.header
 	for i := sl.level; i >= 0; i-- {
-		// วิ่งไปทางขวาจนกว่าโหนดถัดไปจะเป็นโหนดสุดท้ายในชั้นนั้นๆ
+		// Traverse right until the node *after* the next one is nil.
+		// This positions `current` as the predecessor of the last node at this level.
+		// วิ่งไปทางขวาจนกว่าโหนดที่อยู่ "ถัดจากโหนดถัดไป" จะเป็น nil
+		// ซึ่งจะทำให้ `current` อยู่ในตำแหน่ง "ก่อนหน้าโหนดสุดท้าย" ของชั้นนี้พอดี
 		for current.forward[i] != nil && current.forward[i].forward[i] != nil {
 			current = current.forward[i]
 		}
