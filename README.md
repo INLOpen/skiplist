@@ -14,7 +14,7 @@ This library provides a skiplist data structure that is easy to use, highly effi
 *   **🎛️ Customizable Sorting**: Supports custom comparator functions, enabling complex sorting logic for any key type (e.g., `structs`).
 *   **🤝 Thread-Safe**: All operations are safe for concurrent use from multiple goroutines.
 *   **✨ Rich API**: Includes a comprehensive set of methods like `RangeQuery`, `PopMin`, `PopMax`, `Predecessor`, `Successor`, and more.
-*   **🚶 Full-Featured Iterator**: Provides a powerful iterator with `Seek`, `Next`, `Rewind`, etc., for flexible data traversal.
+*   **🚶 Full-Featured Iterator**: Provides a powerful bidirectional iterator with `Seek`, `Next`, `Prev`, `First`, `Last`, `Reset`, etc., for flexible data traversal.
 
 ## Performance
 
@@ -25,7 +25,7 @@ Benchmarks are run against Go's built-in `map` for comparison. The results show 
 *   **`Churn`**: This test (delete one, insert one) further demonstrates the skiplist's efficiency in dynamic datasets where memory reuse is critical.
 *   **Iteration (`Range` vs. `Iterator`)**:
     *   `Range` and `RangeWithIterator` are the most efficient ways to iterate, holding a single lock for the entire duration.
-    *   The standard `Iterator` (`Iterator_Safe`) is significantly slower because it acquires a lock for *every operation* (`Valid`, `Key`, `Next`), making it safe but less performant for full scans. Use it when you need fine-grained control and cannot hold a lock for the entire loop.
+    *   The standard `Iterator` (`Iterator_Safe`) is significantly slower because it acquires a lock for *every operation* (`Next`, `Key`, `Value`), making it safe but less performant for full scans. Use it when you need fine-grained control and cannot hold a lock for the entire loop.
 
 **Conclusion**: Choose this skiplist when you need **sorted data**, **ordered iteration (Range queries)**, or **high performance in high-churn environments** to reduce GC pressure. For simple, unordered key-value storage, the built-in `map` is typically faster.
 
@@ -33,17 +33,17 @@ Benchmarks are run against Go's built-in `map` for comparison. The results show 
 
 | Benchmark                               | ns/op      | B/op | allocs/op |
 | --------------------------------------- | ---------- | ---- | --------- |
-| `BenchmarkSkipList_Insert`              | 1931       | 58   | 2         |
-| `BenchmarkMap_Insert`                   | 84.07      | 0    | 0         |
-| `BenchmarkSkipList_Search`              | 228.9      | 0    | 0         |
-| `BenchmarkMap_Search`                   | 20.16      | 0    | 0         |
-| `BenchmarkSkipList_Delete`              | 497.0      | 0    | 0         |
-| `BenchmarkMap_Delete`                   | 51.45      | 0    | 0         |
-| `BenchmarkSkipList_Insert_SingleOp_Warm`| 86.69      | 0    | 0         |
-| `BenchmarkSkipList_Churn`               | 301.3      | 0    | 0         |
-| `BenchmarkSkipList_Range`               | 113397     | 51   | 0         |
-| `BenchmarkSkipList_Iterator_Safe`       | 583459     | 262  | 0         |
-| `BenchmarkSkipList_RangeWithIterator`   | 107438     | 71   | 1         |
+| `BenchmarkSkipList_Insert`              | 1705       | 58   | 2         |
+| `BenchmarkMap_Insert`                   | 78.38      | 1    | 0         |
+| `BenchmarkSkipList_Search`              | 212.0      | 0    | 0         |
+| `BenchmarkMap_Search`                   | 18.94      | 0    | 0         |
+| `BenchmarkSkipList_Delete`              | 462.0      | 0    | 0         |
+| `BenchmarkMap_Delete`                   | 49.02      | 0    | 0         |
+| `BenchmarkSkipList_Insert_SingleOp_Warm`| 75.03      | 0    | 0         |
+| `BenchmarkSkipList_Churn`               | 263.1      | 0    | 0         |
+| `BenchmarkSkipList_Range`               | 85396      | 31   | 0         |
+| `BenchmarkSkipList_Iterator_Safe`       | 416287     | 168  | 0         |
+| `BenchmarkSkipList_RangeWithIterator`   | 92973      | 60   | 1         |
 
 ## Installation
 
@@ -165,9 +165,8 @@ func main() {
 
 	// Iterate from the seeked position
 	fmt.Println("Iterating from key 25 onwards:")
-	for it.Valid() {
+	for it.Next() {
 		fmt.Printf("  %d: %s\n", it.Key(), it.Value())
-		it.Next()
 	}
 	// Output:
 	//   30: C
@@ -202,12 +201,15 @@ func main() {
 *   `(sl *SkipList[K, V]) NewIterator() *Iterator[K, V]`
 
 ### Iterator Methods
-*   `(it *Iterator[K, V]) Valid() bool`
+*   `(it *Iterator[K, V]) Next() bool`
+*   `(it *Iterator[K, V]) Prev() bool`
 *   `(it *Iterator[K, V]) Key() K`
 *   `(it *Iterator[K, V]) Value() V`
-*   `(it *Iterator[K, V]) Next()`
-*   `(it *Iterator[K, V]) Rewind()`
 *   `(it *Iterator[K, V]) Seek(key K)`
+*   `(it *Iterator[K, V]) First() bool`
+*   `(it *Iterator[K, V]) Last() bool`
+*   `(it *Iterator[K, V]) Reset()`
+*   `(it *Iterator[K, V]) Clone() *Iterator[K, V]`
 
 ## Contributing
 

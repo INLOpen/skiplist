@@ -127,6 +127,55 @@ func TestSkipList(t *testing.T) {
 	})
 }
 
+func TestSkipList_Clear(t *testing.T) {
+	sl := New[int, string]()
+	sl.Insert(10, "ten")
+	sl.Insert(20, "twenty")
+	sl.Insert(30, "thirty")
+
+	if sl.Len() != 3 {
+		t.Fatalf("Expected length 3 before Clear, got %d", sl.Len())
+	}
+
+	// Clear the list
+	sl.Clear()
+
+	// Check if the list is empty
+	if sl.Len() != 0 {
+		t.Errorf("Expected length 0 after Clear, got %d", sl.Len())
+	}
+
+	if _, ok := sl.Search(20); ok {
+		t.Error("Search(20) should fail after Clear, but it succeeded")
+	}
+
+	if _, ok := sl.Min(); ok {
+		t.Error("Min() on cleared list should return ok=false")
+	}
+
+	if _, ok := sl.Max(); ok {
+		t.Error("Max() on cleared list should return ok=false")
+	}
+
+	// Test if the list is usable after clearing
+	sl.Insert(100, "one hundred")
+	sl.Insert(50, "fifty")
+
+	if sl.Len() != 2 {
+		t.Errorf("Expected length 2 after re-inserting, got %d", sl.Len())
+	}
+
+	node, ok := sl.Search(100)
+	if !ok || node.Value != "one hundred" {
+		t.Errorf("Search(100) after Clear and re-insert failed")
+	}
+
+	minNode, ok := sl.Min()
+	if !ok || minNode.Key != 50 {
+		t.Errorf("Min() after Clear and re-insert failed, expected 50, got %v", minNode.Key)
+	}
+}
+
 func TestSkipListConcurrent(t *testing.T) {
 	sl := New[int, int]()
 	wg := sync.WaitGroup{}
@@ -593,9 +642,8 @@ func TestSkipList_Iterator(t *testing.T) {
 		var collectedKeys []int
 		expectedKeys := []int{10, 20, 30, 40, 50}
 
-		for it.Valid() {
+		for it.Next() {
 			collectedKeys = append(collectedKeys, it.Key())
-			it.Next()
 		}
 
 		if len(collectedKeys) != len(expectedKeys) {
@@ -608,50 +656,150 @@ func TestSkipList_Iterator(t *testing.T) {
 		}
 	})
 
-	t.Run("Rewind", func(t *testing.T) {
+	t.Run("Reset", func(t *testing.T) {
 		it := sl.NewIterator()
+		it.Next() // Move to 10
 		it.Next() // Move to 20
-		it.Next() // Move to 30
 
-		it.Rewind()
-		if !it.Valid() || it.Key() != 10 {
-			t.Errorf("Rewind failed: Expected key 10, got %v", it.Key())
+		it.Reset()
+		// After reset, the first call to Next() should yield the first element
+		if !it.Next() || it.Key() != 10 {
+			t.Errorf("Reset failed: Expected to get key 10 after reset and Next(), but got something else")
 		}
 	})
 
 	t.Run("Seek to existing key", func(t *testing.T) {
 		it := sl.NewIterator()
 		it.Seek(30)
-		if !it.Valid() || it.Key() != 30 || it.Value() != "thirty" {
-			t.Errorf("Seek(30) failed: Expected (30, 'thirty'), got (%v, '%v')", it.Key(), it.Value())
+		// First Next() after seek should land on the target key
+		if !it.Next() || it.Key() != 30 || it.Value() != "thirty" {
+			t.Errorf("Seek(30) failed: Expected to get (30, 'thirty'), but got (%v, '%v')", it.Key(), it.Value())
 		}
-		it.Next()
-		if !it.Valid() || it.Key() != 40 {
-			t.Errorf("After Seek(30) and Next(), expected key 40, got %v", it.Key())
+		// Second Next() should move to the next element
+		if !it.Next() || it.Key() != 40 {
+			t.Errorf("After Seek(30) and Next(), expected to get key 40, but got %v", it.Key())
 		}
 	})
 
 	t.Run("Seek to non-existing key (between)", func(t *testing.T) {
 		it := sl.NewIterator()
 		it.Seek(25) // Should seek to 30
-		if !it.Valid() || it.Key() != 30 {
-			t.Errorf("Seek(25) failed: Expected key 30, got %v", it.Key())
+		if !it.Next() || it.Key() != 30 {
+			t.Errorf("Seek(25) failed: Expected to get key 30, but got %v", it.Key())
 		}
 	})
 
 	t.Run("Seek to key smaller than min", func(t *testing.T) {
 		it := sl.NewIterator()
 		it.Seek(5) // Should seek to 10
-		if !it.Valid() || it.Key() != 10 {
-			t.Errorf("Seek(5) failed: Expected key 10, got %v", it.Key())
+		if !it.Next() || it.Key() != 10 {
+			t.Errorf("Seek(5) failed: Expected to get key 10, but got %v", it.Key())
 		}
 	})
 
 	t.Run("Seek to key larger than max", func(t *testing.T) {
 		it := sl.NewIterator()
 		it.Seek(55) // Should be invalid
-		if it.Valid() {
-			t.Errorf("Seek(55) failed: Expected invalid iterator, got key %v", it.Key())
+		if it.Next() {
+			t.Errorf("Seek(55) failed: Expected Next() to return false, but it returned true with key %v", it.Key())
+		}
+	})
+
+	t.Run("First", func(t *testing.T) {
+		it := sl.NewIterator()
+		if !it.First() {
+			t.Fatal("First() returned false on a non-empty list")
+		}
+		if it.Key() != 10 {
+			t.Errorf("First(): Expected key 10, got %v", it.Key())
+		}
+		// Calling Next() after First() should move to the second element
+		if !it.Next() || it.Key() != 20 {
+			t.Errorf("Next() after First(): Expected key 20, got %v", it.Key())
+		}
+
+		// Test on empty list
+		emptyIt := New[int, string]().NewIterator()
+		if emptyIt.First() {
+			t.Error("First() on empty list should return false")
+		}
+	})
+
+	t.Run("Last", func(t *testing.T) {
+		it := sl.NewIterator()
+		if !it.Last() {
+			t.Fatal("Last() returned false on a non-empty list")
+		}
+		if it.Key() != 50 {
+			t.Errorf("Last(): Expected key 50, got %v", it.Key())
+		}
+		// Calling Next() after Last() should return false
+		if it.Next() {
+			t.Errorf("Next() after Last() should return false, but it returned true with key %v", it.Key())
+		}
+
+		// Test on empty list
+		emptyIt := New[int, string]().NewIterator()
+		if emptyIt.Last() {
+			t.Error("Last() on empty list should return false")
+		}
+	})
+
+	t.Run("Reverse iteration", func(t *testing.T) {
+		it := sl.NewIterator()
+		var collectedKeys []int
+		expectedKeys := []int{50, 40, 30, 20, 10}
+
+		// Start from the last element
+		if !it.Last() {
+			t.Fatal("Last() returned false on a non-empty list")
+		}
+
+		for {
+			collectedKeys = append(collectedKeys, it.Key())
+			if !it.Prev() {
+				break
+			}
+		}
+
+		if len(collectedKeys) != len(expectedKeys) {
+			t.Fatalf("Reverse: Expected %d keys, got %d. Keys: %v", len(expectedKeys), len(collectedKeys), collectedKeys)
+		}
+		for i, k := range collectedKeys {
+			if k != expectedKeys[i] {
+				t.Errorf("Reverse: Expected key %d at index %d, got %d", expectedKeys[i], i, k)
+			}
+		}
+	})
+
+	t.Run("Clone", func(t *testing.T) {
+		it1 := sl.NewIterator()
+		it1.Next() // it1 is at 10
+		it1.Next() // it1 is at 20
+
+		it2 := it1.Clone() // it2 should also be at 20
+
+		// Check that it2 is at the correct position
+		if it2.Key() != 20 {
+			t.Errorf("Cloned iterator should be at key 20, but got %v", it2.Key())
+		}
+
+		// Advance it1, it2 should not be affected
+		it1.Next() // it1 is at 30
+		if it1.Key() != 30 {
+			t.Errorf("Original iterator failed to advance to 30, got %v", it1.Key())
+		}
+		if it2.Key() != 20 {
+			t.Errorf("Cloned iterator was affected by original's Next(), expected 20, got %v", it2.Key())
+		}
+
+		// Advance it2, it1 should not be affected
+		it2.Next() // it2 is at 30
+		if it2.Key() != 30 {
+			t.Errorf("Cloned iterator failed to advance to 30, got %v", it2.Key())
+		}
+		if it1.Key() != 30 {
+			t.Errorf("Original iterator was affected by cloned's Next(), expected 30, got %v", it1.Key())
 		}
 	})
 }
@@ -669,9 +817,8 @@ func TestSkipList_RangeWithIterator(t *testing.T) {
 		expectedKeys := []int{10, 20, 30, 40, 50}
 
 		sl.RangeWithIterator(func(it *Iterator[int, string]) {
-			for it.Valid() {
+			for it.Next() {
 				collectedKeys = append(collectedKeys, it.Key())
-				it.Next()
 			}
 		})
 
@@ -691,9 +838,8 @@ func TestSkipList_RangeWithIterator(t *testing.T) {
 
 		sl.RangeWithIterator(func(it *Iterator[int, string]) {
 			it.Seek(25) // Should land on 30
-			for it.Valid() {
+			for it.Next() {
 				collectedKeys = append(collectedKeys, it.Key())
-				it.Next()
 			}
 		})
 
@@ -709,15 +855,11 @@ func TestSkipList_RangeWithIterator(t *testing.T) {
 
 	t.Run("Empty list", func(t *testing.T) {
 		emptySl := New[int, string]()
-		var count int
+		// The callback should be called, but the loop inside should not execute.
 		emptySl.RangeWithIterator(func(it *Iterator[int, string]) {
-			if it.Valid() {
-				t.Error("Iterator on empty list should not be valid")
+			if it.Next() {
+				t.Error("Next() on empty list should return false")
 			}
-			count++
 		})
-		if count != 1 {
-			t.Error("Callback should be called exactly once on an empty list")
-		}
 	})
 }
