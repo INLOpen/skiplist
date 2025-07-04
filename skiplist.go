@@ -544,6 +544,33 @@ func (sl *SkipList[K, V]) Successor(key K) (*Node[K, V], bool) {
 	return nil, false
 }
 
+// Seek finds the first node with a key greater than or equal to the given key.
+// It returns the node and true if such a node is found, otherwise it returns nil and false.
+// Seek ค้นหาโหนดแรกที่มี key เท่ากับหรือมากกว่า key ที่กำหนด
+// คืนค่าโหนดและ true หากพบ, มิฉะนั้นคืนค่า nil และ false
+func (sl *SkipList[K, V]) Seek(key K) (*Node[K, V], bool) {
+	sl.mutex.RLock()
+	defer sl.mutex.RUnlock()
+
+	current := sl.header
+
+	// Find the node preceding the target position.
+	for i := sl.level; i >= 0; i-- {
+		for current.forward[i] != nil && sl.compare(current.forward[i].Key, key) < 0 {
+			current = current.forward[i]
+		}
+	}
+
+	// The next node is the first one with a key >= key.
+	current = current.forward[0]
+
+	if current != nil {
+		return current, true
+	}
+
+	return nil, false
+}
+
 // PopMin ดึง key-value คู่ที่มี key น้อยที่สุดออกจาก skiplist และลบโหนดนั้นออก
 // PopMin removes and returns the smallest key-value pair from the skiplist.
 // It returns the key, value, and true if an item was popped, otherwise it returns zero values and false.
