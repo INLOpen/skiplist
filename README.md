@@ -193,6 +193,7 @@ func main() {
 *   `(sl *SkipList[K, V]) PopMax() (*Node[K, V], bool)`
 *   `(sl *SkipList[K, V]) Predecessor(key K) (*Node[K, V], bool)`
 *   `(sl *SkipList[K, V]) Successor(key K) (*Node[K, V], bool)`
+*   `(sl *SkipList[K, V]) Seek(key K) (*Node[K, V], bool)`
 
 ### Iteration & Range
 *   `(sl *SkipList[K, V]) Range(f func(key K, value V) bool)`

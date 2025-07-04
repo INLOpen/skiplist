@@ -423,6 +423,64 @@ func TestSkipList_Successor(t *testing.T) {
 	}
 }
 
+func TestSkipList_Seek(t *testing.T) {
+	sl := New[int, string]()
+
+	// Test on empty list
+	_, ok := sl.Seek(10)
+	if ok {
+		t.Error("Seek on empty list should return false")
+	}
+
+	sl.Insert(10, "ten")
+	sl.Insert(20, "twenty")
+	sl.Insert(40, "forty")
+	sl.Insert(50, "fifty")
+
+	// Test seeking to an existing key
+	node, ok := sl.Seek(20)
+	if !ok || node.Key != 20 || node.Value != "twenty" {
+		t.Errorf("Seek(20): Expected (20, 'twenty'), but got (%v, '%v')", node.Key, node.Value)
+	}
+
+	// Test seeking to a non-existing key (between two keys)
+	node, ok = sl.Seek(25)
+	if !ok || node.Key != 40 || node.Value != "forty" {
+		t.Errorf("Seek(25): Expected (40, 'forty'), but got (%v, '%v')", node.Key, node.Value)
+	}
+
+	// Test seeking to the first key
+	node, ok = sl.Seek(10)
+	if !ok || node.Key != 10 || node.Value != "ten" {
+		t.Errorf("Seek(10): Expected (10, 'ten'), but got (%v, '%v')", node.Key, node.Value)
+	}
+
+	// Test seeking to a key smaller than the minimum key
+	node, ok = sl.Seek(5)
+	if !ok || node.Key != 10 || node.Value != "ten" {
+		t.Errorf("Seek(5): Expected (10, 'ten'), but got (%v, '%v')", node.Key, node.Value)
+	}
+
+	// Test seeking to the last key
+	node, ok = sl.Seek(50)
+	if !ok || node.Key != 50 || node.Value != "fifty" {
+		t.Errorf("Seek(50): Expected (50, 'fifty'), but got (%v, '%v')", node.Key, node.Value)
+	}
+
+	// Test seeking to a key larger than the maximum key
+	_, ok = sl.Seek(55)
+	if ok {
+		t.Errorf("Seek(55): Expected no node, but found one with key %v", node.Key)
+	}
+
+	// Test after deletion
+	sl.Delete(20)
+	node, ok = sl.Seek(15)
+	if !ok || node.Key != 40 || node.Value != "forty" {
+		t.Errorf("Seek(15) after deleting 20: Expected (40, 'forty'), but got (%v, '%v')", node.Key, node.Value)
+	}
+}
+
 // mockRandSource คือ random source ปลอมที่คืนค่าตัวเลขตามลำดับที่กำหนดไว้ล่วงหน้า
 // เพื่อใช้ในการทดสอบที่ต้องการผลลัพธ์ที่แน่นอน
 type mockRandSource struct {
