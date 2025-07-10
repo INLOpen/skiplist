@@ -21,7 +21,7 @@ package skiplist
 //	}
 type Iterator[K any, V any] struct {
 	sl      *SkipList[K, V] // อ้างอิงถึง Skiplist ที่กำลังวนลูป
-	current *Node[K, V]     // โหนดปัจจุบันที่ Iterator ชี้อยู่
+	current INode[K, V]     // โหนดปัจจุบันที่ Iterator ชี้อยู่
 	unsafe  bool            // ถ้าเป็น true, จะไม่ทำการ lock/unlock (ใช้สำหรับ RangeWithIterator)
 }
 
@@ -51,8 +51,17 @@ func (it *Iterator[K, V]) Next() bool {
 	if it.current == nil {
 		return false
 	}
-	it.current = it.current.forward[0]
-	return it.current != nil
+	// We must cast to the concrete type to access the forward pointer.
+	// Then, we check the concrete pointer for nilness, not the interface.
+	// This avoids the `(type, nil)` interface problem where `it.current != nil` could be true
+	// even if the underlying pointer is nil, causing a panic on the next Key/Value call.
+	nextNode := it.current.(*node[K, V]).forward[0]
+	if nextNode == nil {
+		it.current = nil // Mark as exhausted by setting to a true nil interface.
+		return false
+	}
+	it.current = nextNode
+	return true
 }
 
 // Key returns the key of the element at the current iterator position.
@@ -66,7 +75,7 @@ func (it *Iterator[K, V]) Key() K {
 	}
 	// No nil check needed here because it's a contract violation to call Key()
 	// if Next() hasn't returned true. The current node is guaranteed to be non-nil.
-	return it.current.Key
+	return it.current.Key()
 }
 
 // Value returns the value of the element at the current iterator position.
@@ -79,7 +88,7 @@ func (it *Iterator[K, V]) Value() V {
 		defer it.sl.mutex.RUnlock()
 	}
 	// No nil check needed here.
-	return it.current.Value
+	return it.current.Value()
 }
 
 // Reset moves the iterator back to its initial state, before the first element.
@@ -99,19 +108,32 @@ func (it *Iterator[K, V]) Reset() {
 // To begin reverse iteration, first position the iterator at the end using Last().
 //
 // Prev เลื่อน Iterator ไปยังรายการก่อนหน้า และคืนค่า true หากสำเร็จ
-// คืนค่า false หากไม่มีรายการเหลือแล้วในทิศทางนั้น
+// คืนค่า false หากไม่มีรายการเหลือแล้วในทิศทางนั้น (เช่น อยู่ที่รายการแรกแล้ว)
 // หากต้องการเริ่มวนลูปย้อนกลับ, ให้ใช้ Last() เพื่อไปยังท้ายสุดก่อน
 func (it *Iterator[K, V]) Prev() bool {
 	if !it.unsafe {
 		it.sl.mutex.RLock()
 		defer it.sl.mutex.RUnlock()
 	}
-	if it.current == nil || it.current.backward == nil {
-		it.current = nil // Mark as exhausted
+
+	currentNode, _ := it.current.(*node[K, V])
+	// If the iterator is exhausted (nil) or at the header (which means it's positioned
+	// before the first element), we cannot move backward.
+	if currentNode == nil || currentNode == it.sl.header {
 		return false
 	}
-	it.current = it.current.backward
-	return it.current != it.sl.header
+
+	// Move to the previous node. This could be the header node.
+	it.current = currentNode.backward
+
+	// The move is successful only if the new position is a valid data node.
+	// If we've moved to the header, it means we've gone past the beginning of the list.
+	// We set current to nil to signal exhaustion, consistent with Next().
+	if it.current == it.sl.header {
+		it.current = nil
+		return false
+	}
+	return true
 }
 
 // First moves the iterator to the first element in the skiplist.
@@ -173,7 +195,7 @@ func (it *Iterator[K, V]) Seek(key K) {
 	current := it.sl.header
 	// ค้นหาตำแหน่งที่จะเริ่ม
 	for i := it.sl.level; i >= 0; i-- {
-		for current.forward[i] != nil && it.sl.compare(current.forward[i].Key, key) < 0 {
+		for current.forward[i] != nil && it.sl.compare(current.forward[i].key, key) < 0 {
 			current = current.forward[i]
 		}
 	}
