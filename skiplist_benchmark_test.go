@@ -303,17 +303,20 @@ func BenchmarkSkipList_RangeWithIterator(b *testing.B) {
 // negligible compared to the cost of filling the list.
 func BenchmarkSkipList_Clear(b *testing.B) {
 	for _, setup := range getTestSetups[int, int]() {
+		// This benchmark now measures the cost of clearing a list and refilling it,
+		// which is a more stable and realistic workload than creating a new list every time.
 		b.Run(setup.name, func(b *testing.B) {
+			sl := setup.constructor(nil)
 			keys := generateRandomKeys(benchmarkSize)
 			b.ReportAllocs()
 			b.ResetTimer()
 
 			for i := 0; i < b.N; i++ {
-				sl := setup.constructor(nil)
+				// The timed operation is clearing the list and then refilling it.
+				sl.Clear()
 				for _, key := range keys {
 					sl.Insert(key, key)
 				}
-				sl.Clear()
 			}
 		})
 	}
