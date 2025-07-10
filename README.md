@@ -9,7 +9,9 @@ This library provides a skiplist data structure that is easy to use, highly effi
 ## Features
 
 *   **🚀 High Performance**: O(log n) average time complexity for major operations.
-*   **🧠 Memory Optimized**: Utilizes `sync.Pool` to recycle nodes, significantly reducing memory allocations and GC pressure in high-churn scenarios.
+*   **🧠 Memory Optimized**:
+	*   **`sync.Pool` (Default)**: Recycles nodes to reduce memory allocations and GC pressure, ideal for high-churn workloads.
+	*   **⚡️ Optional Memory Arena**: For maximum performance and minimal GC impact, an optional lock-free memory arena allocator can be enabled.
 *   **⛓️ Generic**: Fully generic (`[K any, V any]`), allowing any type for keys and values.
 *   **🎛️ Customizable Sorting**: Supports custom comparator functions, enabling complex sorting logic for any key type (e.g., `structs`).
 *   **🤝 Thread-Safe**: All operations are safe for concurrent use from multiple goroutines.
@@ -18,37 +20,31 @@ This library provides a skiplist data structure that is easy to use, highly effi
 
 ## Performance
 
-Benchmarks are run against Go's built-in `map` for comparison. The results show that while `map` is faster for basic unsorted operations, the skiplist offers competitive performance, especially in high-churn scenarios, and provides the unique advantage of ordered data traversal.
+This skiplist offers two memory allocation strategies, each with distinct performance characteristics.
 
-*   **`Insert/Search/Delete`**: The native `map` is faster due to its highly optimized hash table implementation. The skiplist has overhead from maintaining sorted order and managing pointers across multiple levels.
-*   **`Insert_SingleOp_Warm`**: This benchmark highlights the power of `sync.Pool`. When nodes are recycled, skiplist insertion performance is excellent, with **zero allocations per operation**, making it ideal for workloads with frequent insertions and deletions.
-*   **`Churn`**: This test (delete one, insert one) further demonstrates the skiplist's efficiency in dynamic datasets where memory reuse is critical.
-*   **Iteration (`Range` vs. `Iterator`)**:
-    *   `Range` and `RangeWithIterator` are the most efficient ways to iterate, holding a single lock for the entire duration.
-    *   The standard `Iterator` (`Iterator_Safe`) is significantly slower because it acquires a lock for *every operation* (`Next`, `Key`, `Value`), making it safe but less performant for full scans. Use it when you need fine-grained control and cannot hold a lock for the entire loop.
+*   **`sync.Pool` (Default)**: This is the standard, memory-efficient choice. It excels in high-churn workloads (frequent inserts and deletes) by recycling nodes, which significantly reduces the garbage collector's workload.
+*   **`Memory Arena` (Optional)**: This is the high-throughput choice. By pre-allocating a large, contiguous block of memory, it nearly eliminates GC overhead for node allocations, resulting in lower and more predictable latency for bulk operations. It uses more memory upfront and is less ideal for high-churn workloads where nodes are not reclaimed individually.
 
-**Conclusion**: Choose this skiplist when you need **sorted data**, **ordered iteration (Range queries)**, or **high performance in high-churn environments** to reduce GC pressure. For simple, unordered key-value storage, the built-in `map` is typically faster.
+**Conclusion**:
+*   Use the **default `sync.Pool`** for general-purpose use and high-churn scenarios.
+*   Use the **`Memory Arena`** when you need the absolute lowest latency for bulk inserts/deletes and can predict memory usage.
+*   Choose this skiplist over a `map` when you need **sorted data**, **ordered iteration (Range queries)**, or **fine-grained control over memory allocation and GC pressure**.
 
-*Results on `13th Gen Intel(R) Core(TM) i9-13900H` with `benchmarkSize = 10000`*
+*Results on `13th Gen Intel(R) Core(TM) i9-13900H`*
 
-| Benchmark                               | ns/op      | B/op | allocs/op |
-| --------------------------------------- | ---------- | ---- | --------- |
-| `BenchmarkSkipList_Insert`              | 1705       | 58   | 2         |
-| `BenchmarkMap_Insert`                   | 78.38      | 1    | 0         |
-| `BenchmarkSkipList_Search`              | 212.0      | 0    | 0         |
-| `BenchmarkMap_Search`                   | 18.94      | 0    | 0         |
-| `BenchmarkSkipList_Delete`              | 462.0      | 0    | 0         |
-| `BenchmarkMap_Delete`                   | 49.02      | 0    | 0         |
-| `BenchmarkSkipList_Insert_SingleOp_Warm`| 75.03      | 0    | 0         |
-| `BenchmarkSkipList_Churn`               | 263.1      | 0    | 0         |
-| `BenchmarkSkipList_Range`               | 85396      | 31   | 0         |
-| `BenchmarkSkipList_Iterator_Safe`       | 416287     | 168  | 0         |
-| `BenchmarkSkipList_RangeWithIterator`   | 92973      | 60   | 1         |
+| Benchmark (ns/op) | `sync.Pool` (Default) | `Memory Arena` | Notes |
+|---|---|---|---|
+| **Bulk Insert (100k items)** | 106,216,625 | 120,044,970 | Time to insert 100k items |
+| **Search (avg)** | 286.1 | 351.8 | Average time per search |
+| **Delete (avg)** | 2,446 | 2,227 | Average time per delete |
+| **Ordered Iteration (10k items)** | 213,295 | 181,974 | Time for full scan with `RangeWithIterator` |
+| **Churn (delete/insert)** | 271.3 | N/A | Arena not designed for this workload |
+| **Warm Insert (1 op)** | 84.50 | N/A | Highlights `sync.Pool`'s reuse speed |
 
 ## Installation
 
-```sh
-go get github.com/INLOpen/skiplist
+```bash
+$ go get github.com/INLOpen/skiplist
 ```
 
 ## Usage
@@ -68,16 +64,16 @@ import (
 func main() {
 	// Create a new skiplist for int keys and string values.
 	// The default comparator (cmp.Compare) is used automatically.
-	sl := skiplist.New[int, string]()
+	sl := skiplist.Newint, string
 
-	sl.Insert(30, "thirty")
 	sl.Insert(10, "ten")
 	sl.Insert(20, "twenty")
+	sl.Insert(30, "thirty")
 
 	// Search for a value
-	node, ok := sl.Search(20) // Search now returns *Node[K,V], bool
+	node, ok := sl.Search(20)
 	if ok {
-		fmt.Printf("Found key 20 with value: %s\n", node.Value) // "twenty"
+		fmt.Printf("Found key 20 with value: %s\n", node.Value()) // "twenty"
 	}
 
 	// Iterate over all items in sorted order
@@ -87,13 +83,38 @@ func main() {
 		return true // Continue iteration
 	})
 
-	// Pop the maximum element (PopMax now returns *Node[K,V], bool)
+	// Pop the maximum element
 	maxNode, ok := sl.PopMax()
 	if ok {
-		fmt.Printf("Popped max element: %d -> %s\n", maxNode.Key, maxNode.Value) // 30 -> "thirty"
+		fmt.Printf("Popped max element: %d -> %s\n", maxNode.Key(), maxNode.Value()) // 30 -> "thirty"
 	}
 
 	fmt.Printf("Current length: %d\n", sl.Len()) // 2
+}
+```
+
+### High-Performance Usage (with Memory Arena)
+
+For scenarios demanding the lowest possible latency, such as bulk loading data, you can enable the memory arena.
+
+```go
+package main
+
+import (
+	"fmt"
+	"github.com/INLOpen/skiplist"
+)
+
+func main() {
+	// For maximum performance, create a skiplist with a 128MB memory arena.
+	// This is ideal for scenarios where you insert a large number of items
+	// and want to minimize garbage collection overhead.
+	arenaOpt := skiplist.WithArenaint, string
+	sl := skiplist.Newint, string
+
+	// Operations are the same
+	sl.Insert(1, "one")
+	fmt.Println("Length with Arena:", sl.Len())
 }
 ```
 
@@ -127,14 +148,17 @@ func userComparator(a, b User) int {
 
 func main() {
 	// Create a skiplist with a custom comparator
-	sl := skiplist.NewWithComparator[User, string](userComparator)
+	sl := skiplist.NewWithComparatorUser, string
 
 	sl.Insert(User{ID: 2, Name: "Bob"}, "Engineer")
 	sl.Insert(User{ID: 1, Name: "Alice"}, "Manager")
 
-	// The list is sorted by User.ID
-	minUser, _, _ := sl.Min()
-	fmt.Printf("Min user is: %s (ID: %d)\n", minUser.Name, minUser.ID) // "Alice (ID: 1)"
+	// The list is sorted by User.ID. Min() returns an INode.
+	minNode, ok := sl.Min()
+	if ok {
+		userKey := minNode.Key()
+		fmt.Printf("Min user is: %s (ID: %d), Role: %s\n", userKey.Name, userKey.ID, minNode.Value()) // "Alice (ID: 1), Role: Manager"
+	}
 }
 ```
 
@@ -151,11 +175,11 @@ import (
 )
 
 func main() {
-	sl := skiplist.New[int, string]()
+	sl := skiplist.Newint, string
 	sl.Insert(10, "A")
 	sl.Insert(20, "B")
 	sl.Insert(30, "C")
-	sl.Insert(40, "D") // [Minor: This line was missing in the original diff, adding it for completeness]
+	sl.Insert(40, "D")
 
 	// Create a new iterator
 	it := sl.NewIterator()
@@ -177,29 +201,33 @@ func main() {
 ## API Reference
 
 ### Constructors
-*   `NewK cmp.Ordered, V any *SkipList[K, V]`
-*   `NewWithComparator[K any, V any](compare Comparator[K]) *SkipList[K, V]`
+*   `New[K cmp.Ordered, V any](opts ...Option[K, V]) *SkipList[K, V]`
+*   `NewWithComparator[K any, V any](compare Comparator[K], opts ...Option[K, V]) *SkipList[K, V]`
+
+### Configuration Options
+*   `WithArenaK any, V any Option[K, V]`
 
 ### Basic Operations
-*   `(sl *SkipList[K, V]) Insert(key K, value V)`
-*   `(sl *SkipList[K, V]) Search(key K) (*Node[K, V], bool)`
+*   `(sl *SkipList[K, V]) Insert(key K, value V) INode[K, V]`
+*   `(sl *SkipList[K, V]) Search(key K) (INode[K, V], bool)`
 *   `(sl *SkipList[K, V]) Delete(key K) bool`
 *   `(sl *SkipList[K, V]) Len() int`
 
 ### Ordered Operations
-*   `(sl *SkipList[K, V]) Min() (*Node[K, V], bool)`
-*   `(sl *SkipList[K, V]) Max() (*Node[K, V], bool)`
-*   `(sl *SkipList[K, V]) PopMin() (*Node[K, V], bool)`
-*   `(sl *SkipList[K, V]) PopMax() (*Node[K, V], bool)`
-*   `(sl *SkipList[K, V]) Predecessor(key K) (*Node[K, V], bool)`
-*   `(sl *SkipList[K, V]) Successor(key K) (*Node[K, V], bool)`
-*   `(sl *SkipList[K, V]) Seek(key K) (*Node[K, V], bool)`
+*   `(sl *SkipList[K, V]) Min() (INode[K, V], bool)`
+*   `(sl *SkipList[K, V]) Max() (INode[K, V], bool)`
+*   `(sl *SkipList[K, V]) PopMin() (INode[K, V], bool)`
+*   `(sl *SkipList[K, V]) PopMax() (INode[K, V], bool)`
+*   `(sl *SkipList[K, V]) Predecessor(key K) (INode[K, V], bool)`
+*   `(sl *SkipList[K, V]) Successor(key K) (INode[K, V], bool)`
+*   `(sl *SkipList[K, V]) Seek(key K) (INode[K, V], bool)`
 
 ### Iteration & Range
 *   `(sl *SkipList[K, V]) Range(f func(key K, value V) bool)`
 *   `(sl *SkipList[K, V]) RangeQuery(start, end K, f func(key K, value V) bool)`
 *   `(sl *SkipList[K, V]) CountRange(start, end K) int`
 *   `(sl *SkipList[K, V]) NewIterator() *Iterator[K, V]`
+*   `(sl *SkipList[K, V]) RangeWithIterator(f func(it *Iterator[K, V]))`
 
 ### Iterator Methods
 *   `(it *Iterator[K, V]) Next() bool`
@@ -218,4 +246,4 @@ Contributions are welcome! Please feel free to submit a pull request or open an 
 
 ## License
 
-This project is licensed under the MIT License - see the [LICENSE.md](LICENSE.md) file for details.
+This project is licensed under the MIT License - see the LICENSE.md file for details.
