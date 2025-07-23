@@ -16,6 +16,7 @@ type node[K any, V any] struct {
 	value    V
 	backward *node[K, V]   // ตัวชี้ไปยังโหนดก่อนหน้า (เฉพาะชั้น 0)
 	forward  []*node[K, V] // สไลซ์ของตัวชี้ไปยังโหนดถัดไปในแต่ละชั้น
+	span     []int         // span บอกจำนวนโหนดที่ข้ามไปในแต่ละชั้น
 }
 
 func (n *node[K, V]) Key() K {
@@ -64,7 +65,10 @@ func (p *poolAllocator[K, V]) Put(n *node[K, V]) {
 	n.key = zeroK
 	n.value = zeroV
 	n.backward = nil
-	clear(n.forward) // Go 1.21+
+	// เคลียร์ slice ทั้งสองเพื่อล้างข้อมูลเก่า แต่ยังคงเก็บ backing array ไว้เพื่อนำกลับมาใช้ใหม่
+	// ซึ่งเป็นหัวใจสำคัญของการทำ pooling optimization
+	clear(n.span)
+	clear(n.forward)
 	p.pool.Put(n)
 }
 

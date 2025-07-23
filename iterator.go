@@ -48,14 +48,16 @@ func (it *Iterator[K, V]) Next() bool {
 		it.sl.mutex.RLock()
 		defer it.sl.mutex.RUnlock()
 	}
-	if it.current == nil {
+
+	// Safely get the concrete node pointer from the interface.
+	// This correctly handles both a nil interface and an interface containing a nil pointer.
+	currentNode, ok := it.current.(*node[K, V])
+	if !ok || currentNode == nil {
+		it.current = nil // Ensure iterator is marked as exhausted.
 		return false
 	}
-	// We must cast to the concrete type to access the forward pointer.
-	// Then, we check the concrete pointer for nilness, not the interface.
-	// This avoids the `(type, nil)` interface problem where `it.current != nil` could be true
-	// even if the underlying pointer is nil, causing a panic on the next Key/Value call.
-	nextNode := it.current.(*node[K, V]).forward[0]
+
+	nextNode := currentNode.forward[0]
 	if nextNode == nil {
 		it.current = nil // Mark as exhausted by setting to a true nil interface.
 		return false
@@ -233,26 +235,33 @@ func (it *Iterator[K, V]) SeekToLast() bool {
 	return true
 }
 
-// Seek positions the iterator just before the first element with a key greater than or equal to the given key.
-// A subsequent call to Next() will advance the iterator to that element.
-// Seek เลื่อน Iterator ไปยังตำแหน่งก่อนหน้าของรายการที่มี key เท่ากับหรือมากกว่า key ที่กำหนด
-// การเรียก Next() หลังจากนี้จะเลื่อนไปยังรายการนั้น
-func (it *Iterator[K, V]) Seek(key K) {
+// Seek moves the iterator to the first element with a key greater than or equal to the given key.
+// It returns true if such an element is found, otherwise it returns false and the iterator is positioned at the end.
+// After a successful seek, Key() and Value() will return the data of the found element.
+// Seek เลื่อน Iterator ไปยังรายการแรกที่มี key เท่ากับหรือมากกว่า key ที่กำหนด
+// คืนค่า true หากพบรายการดังกล่าว, มิฉะนั้นคืนค่า false และ Iterator จะชี้ไปที่ท้ายสุดของ list
+// หลังจาก seek สำเร็จ, Key() และ Value() จะคืนค่าของรายการที่พบ
+func (it *Iterator[K, V]) Seek(key K) bool {
 	if !it.unsafe {
 		it.sl.mutex.RLock()
 		defer it.sl.mutex.RUnlock()
 	}
 
+	// ใช้ตรรกะเดียวกับ SkipList.Seek เพื่อหาโหนดเป้าหมาย (ceiling node)
 	current := it.sl.header
-	// ค้นหาตำแหน่งที่จะเริ่ม
+	// ค้นหาโหนดที่อยู่ก่อนหน้าตำแหน่งเป้าหมาย
 	for i := it.sl.level; i >= 0; i-- {
 		for current.forward[i] != nil && it.sl.compare(current.forward[i].key, key) < 0 {
 			current = current.forward[i]
 		}
 	}
-	// ตั้งค่า current ให้เป็นโหนดก่อนหน้าโหนดเป้าหมาย
-	// เพื่อให้การเรียก Next() ครั้งถัดไปเลื่อนไปยังโหนดเป้าหมายพอดี
-	it.current = current
+	// โหนดถัดไปคือโหนดแรกที่มี key >= key ซึ่งเป็นเป้าหมายของเรา
+	foundNode := current.forward[0]
+	it.current = foundNode
+
+	// การ seek จะสำเร็จถ้าเราหาโหนดเจอ (it.current ไม่ใช่ nil)
+	// ต้องตรวจสอบจาก concrete pointer (foundNode) ไม่ใช่จาก interface (it.current)
+	return foundNode != nil
 }
 
 // Clone creates an independent copy of the iterator at its current position.

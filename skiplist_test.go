@@ -281,7 +281,7 @@ func TestSkipList_RangeQuery(t *testing.T) {
 			sl.Insert(40, "forty")
 			sl.Insert(50, "fifty")
 
-			t.Run("ค้นหาช่วงข้อมูลกลางๆ", func(t *testing.T) {
+			t.Run("Find middle elements", func(t *testing.T) {
 				var keys []int
 				var values []string
 				sl.RangeQuery(15, 45, func(key int, value string) bool {
@@ -305,7 +305,7 @@ func TestSkipList_RangeQuery(t *testing.T) {
 				}
 			})
 
-			t.Run("ค้นหาช่วงที่ไม่มีข้อมูล", func(t *testing.T) {
+			t.Run("Find no elements", func(t *testing.T) {
 				var keys []int
 				sl.RangeQuery(21, 29, func(key int, value string) bool {
 					keys = append(keys, key)
@@ -316,7 +316,7 @@ func TestSkipList_RangeQuery(t *testing.T) {
 				}
 			})
 
-			t.Run("หยุดการทำงานกลางคัน", func(t *testing.T) {
+			t.Run("Find interrupted range", func(t *testing.T) {
 				var keys []int
 				sl.RangeQuery(10, 50, func(key int, value string) bool {
 					keys = append(keys, key)
@@ -334,7 +334,7 @@ func TestSkipList_RangeQuery(t *testing.T) {
 				}
 			})
 
-			t.Run("ช่วงข้อมูลไม่ถูกต้อง (start > end)", func(t *testing.T) {
+			t.Run("Invalid range (start > end)", func(t *testing.T) {
 				var keys []int
 				sl.RangeQuery(40, 20, func(key int, value string) bool {
 					keys = append(keys, key)
@@ -540,6 +540,66 @@ func TestSkipList_Seek(t *testing.T) {
 			if !ok || node.Key() != 40 || node.Value() != "forty" {
 				t.Errorf("Seek(15) after deleting 20: Expected (40, 'forty'), but got (%v, '%v')", node.Key(), node.Value())
 			}
+		})
+	}
+}
+
+func TestSkipList_GetByRank(t *testing.T) {
+	for _, setup := range getTestSetups[int, string]() {
+		t.Run(setup.name, func(t *testing.T) {
+			sl := setup.constructor(nil)
+
+			// Test on empty list
+			if _, ok := sl.GetByRank(0); ok {
+				t.Error("GetByRank(0) on empty list should return false")
+			}
+
+			sl.Insert(10, "ten")
+			sl.Insert(30, "thirty")
+			sl.Insert(20, "twenty")
+			sl.Insert(50, "fifty")
+			sl.Insert(40, "forty")
+			// List is: 10, 20, 30, 40, 50
+
+			tests := []struct {
+				name      string
+				rank      int
+				wantKey   int
+				wantValue string
+				wantOk    bool
+			}{
+				{"Get first element", 0, 10, "ten", true},
+				{"Get middle element", 2, 30, "thirty", true},
+				{"Get last element", 4, 50, "fifty", true},
+				{"Rank out of bounds (negative)", -1, 0, "", false},
+				{"Rank out of bounds (too large)", 5, 0, "", false},
+			}
+
+			for _, tt := range tests {
+				t.Run(tt.name, func(t *testing.T) {
+					node, ok := sl.GetByRank(tt.rank)
+					if ok != tt.wantOk {
+						t.Fatalf("GetByRank(%d): got ok=%v, want ok=%v", tt.rank, ok, tt.wantOk)
+					}
+					if ok {
+						if node.Key() != tt.wantKey || node.Value() != tt.wantValue {
+							t.Errorf("GetByRank(%d): got (%v, '%v'), want (%v, '%v')",
+								tt.rank, node.Key(), node.Value(), tt.wantKey, tt.wantValue)
+						}
+					}
+				})
+			}
+
+			// Test after deletion
+			t.Run("GetByRank after delete", func(t *testing.T) {
+				sl.Delete(10) // List is now: 20, 30, 40, 50
+				sl.Delete(50) // List is now: 20, 30, 40
+
+				node, ok := sl.GetByRank(0) // Rank 0 should now be 20
+				if !ok || node.Key() != 20 {
+					t.Errorf("GetByRank(0) after delete: expected key 20, got %v", node.Key())
+				}
+			})
 		})
 	}
 }
@@ -806,14 +866,26 @@ func TestSkipList_Iterator(t *testing.T) {
 				}
 			})
 
+			t.Run("Seek on empty list", func(t *testing.T) {
+				emptyIt := setup.constructor(nil).NewIterator()
+				if emptyIt.Seek(100) {
+					t.Error("Seek() on empty list should return false")
+				}
+				if emptyIt.Next() {
+					t.Error("Next() after Seek() on empty list should return false")
+				}
+			})
+
 			t.Run("Seek to existing key", func(t *testing.T) {
 				it := sl.NewIterator()
-				it.Seek(30)
-				// First Next() after seek should land on the target key
-				if !it.Next() || it.Key() != 30 || it.Value() != "thirty" {
-					t.Errorf("Seek(30) failed: Expected to get (30, 'thirty'), but got (%v, '%v')", it.Key(), it.Value())
+				if !it.Seek(30) {
+					t.Fatal("Seek(30) should return true, but got false")
 				}
-				// Second Next() should move to the next element
+				// Seek should position AT the target key
+				if it.Key() != 30 || it.Value() != "thirty" {
+					t.Errorf("Seek(30) failed: Expected to be at (30, 'thirty'), but got (%v, '%v')", it.Key(), it.Value())
+				}
+				// Next() should move to the next element
 				if !it.Next() || it.Key() != 40 {
 					t.Errorf("After Seek(30) and Next(), expected to get key 40, but got %v", it.Key())
 				}
@@ -821,23 +893,32 @@ func TestSkipList_Iterator(t *testing.T) {
 
 			t.Run("Seek to non-existing key (between)", func(t *testing.T) {
 				it := sl.NewIterator()
-				it.Seek(25) // Should seek to 30
-				if !it.Next() || it.Key() != 30 {
-					t.Errorf("Seek(25) failed: Expected to get key 30, but got %v", it.Key())
+				if !it.Seek(25) { // Should seek to 30
+					t.Fatal("Seek(25) should return true, but got false")
+				}
+				// Seek should position AT the ceiling key
+				if it.Key() != 30 {
+					t.Errorf("Seek(25) failed: Expected to be at key 30, but got %v", it.Key())
 				}
 			})
 
 			t.Run("Seek to key smaller than min", func(t *testing.T) {
 				it := sl.NewIterator()
-				it.Seek(5) // Should seek to 10
-				if !it.Next() || it.Key() != 10 {
-					t.Errorf("Seek(5) failed: Expected to get key 10, but got %v", it.Key())
+				if !it.Seek(5) { // Should seek to 10
+					t.Fatal("Seek(5) should return true, but got false")
+				}
+				// Seek should position AT the ceiling key
+				if it.Key() != 10 {
+					t.Errorf("Seek(5) failed: Expected to be at key 10, but got %v", it.Key())
 				}
 			})
 
 			t.Run("Seek to key larger than max", func(t *testing.T) {
 				it := sl.NewIterator()
-				it.Seek(55) // Should be invalid
+				if it.Seek(55) { // Should be invalid
+					t.Error("Seek(55) should return false, but got true")
+				}
+				// After a failed seek, the iterator should be exhausted.
 				if it.Next() {
 					t.Errorf("Seek(55) failed: Expected Next() to return false, but it returned true with key %v", it.Key())
 				}
@@ -1035,9 +1116,16 @@ func TestSkipList_RangeWithIterator(t *testing.T) {
 				expectedKeys := []int{30, 40, 50}
 
 				sl.RangeWithIterator(func(it *Iterator[int, string]) {
-					it.Seek(25) // Should position before 30
-					for it.Next() {
-						collectedKeys = append(collectedKeys, it.Key())
+					// Seek(25) should position AT 30 and return true.
+					if it.Seek(25) {
+						// A do-while style loop is needed here to include the first element
+						// since Seek now positions the iterator AT the element.
+						for {
+							collectedKeys = append(collectedKeys, it.Key())
+							if !it.Next() {
+								break
+							}
+						}
 					}
 				})
 
@@ -1063,6 +1151,84 @@ func TestSkipList_RangeWithIterator(t *testing.T) {
 				})
 				if !wasCalled {
 					t.Error("Callback for RangeWithIterator was not called on an empty list")
+				}
+			})
+		})
+	}
+}
+
+func TestSkipList_Rank(t *testing.T) {
+	for _, setup := range getTestSetups[int, string]() {
+		t.Run(setup.name, func(t *testing.T) {
+			sl := setup.constructor(nil)
+
+			// Test on empty list
+			if rank := sl.Rank(100); rank != 0 {
+				t.Errorf("Rank on empty list should be 0, got %d", rank)
+			}
+
+			sl.Insert(10, "ten")
+			sl.Insert(30, "thirty")
+			sl.Insert(20, "twenty")
+			sl.Insert(50, "fifty")
+			sl.Insert(40, "forty")
+			// List is: 10, 20, 30, 40, 50
+
+			tests := []struct {
+				name string
+				key  int
+				want int
+			}{
+				{"Rank of first element", 10, 0},
+				{"Rank of middle element", 30, 2},
+				{"Rank of last element", 50, 4},
+				{"Rank of non-existent key (between)", 25, 2},
+				{"Rank of key smaller than min", 5, 0},
+				{"Rank of key larger than max", 55, 5},
+			}
+
+			for _, tt := range tests {
+				t.Run(tt.name, func(t *testing.T) {
+					if got := sl.Rank(tt.key); got != tt.want {
+						t.Errorf("Rank(%d): got %d, want %d", tt.key, got, tt.want)
+					}
+				})
+			}
+
+			// Test rank after deletion
+			t.Run("Rank after delete", func(t *testing.T) {
+				sl.Delete(30) // List is now: 10, 20, 40, 50
+
+				if rank := sl.Rank(40); rank != 2 {
+					t.Errorf("Rank(40) after deleting 30 should be 2, got %d", rank)
+				}
+				if rank := sl.Rank(50); rank != 3 {
+					t.Errorf("Rank(50) after deleting 30 should be 3, got %d", rank)
+				}
+				if rank := sl.Rank(60); rank != 4 {
+					t.Errorf("Rank(60) after deleting 30 should be 4, got %d", rank)
+				}
+			})
+
+			// Test rank after PopMin
+			t.Run("Rank after PopMin", func(t *testing.T) {
+				sl.PopMin() // Removes 10. List: 20, 40, 50
+				if rank := sl.Rank(20); rank != 0 {
+					t.Errorf("Rank(20) after PopMin should be 0, got %d", rank)
+				}
+				if rank := sl.Rank(40); rank != 1 {
+					t.Errorf("Rank(40) after PopMin should be 1, got %d", rank)
+				}
+			})
+
+			// Test rank after PopMax
+			t.Run("Rank after PopMax", func(t *testing.T) {
+				sl.PopMax() // Removes 50. List: 20, 40
+				if rank := sl.Rank(40); rank != 1 {
+					t.Errorf("Rank(40) after PopMax should be 1, got %d", rank)
+				}
+				if rank := sl.Rank(50); rank != 2 {
+					t.Errorf("Rank(50) after PopMax should be 2, got %d", rank)
 				}
 			})
 		})
