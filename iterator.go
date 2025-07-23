@@ -184,21 +184,30 @@ func (it *Iterator[K, V]) Last() bool {
 
 // SeekToFirst positions the iterator just before the first element.
 // A subsequent call to Next() will advance the iterator to the first element.
-// This is an alias for Reset().
+// It returns true if the list is not empty, indicating that a subsequent
+// call to Next() will succeed.
 // SeekToFirst เลื่อน Iterator ไปยังตำแหน่งก่อนหน้าของรายการแรก
 // การเรียก Next() หลังจากนี้จะเลื่อนไปยังรายการแรก
-// เป็นฟังก์ชันที่ทำงานเหมือนกับ Reset()
-func (it *Iterator[K, V]) SeekToFirst() {
-	it.Reset()
+// คืนค่า true หาก list ไม่ว่างเปล่า เพื่อบ่งชี้ว่าการเรียก Next() ครั้งถัดไปจะสำเร็จ
+func (it *Iterator[K, V]) SeekToFirst() bool {
+	if !it.unsafe {
+		it.sl.mutex.RLock()
+		defer it.sl.mutex.RUnlock()
+	}
+	// Position the iterator at the header, which is before the first element.
+	it.current = it.sl.header
+	// Return true if a first element exists.
+	return it.sl.header.forward[0] != nil
 }
 
 // SeekToLast positions the iterator just before the last element.
 // A subsequent call to Next() will advance the iterator to the last element.
 // If the list is empty, it positions the iterator at the beginning.
+// It returns true if the list is not empty.
 // SeekToLast เลื่อน Iterator ไปยังตำแหน่งก่อนหน้าของรายการสุดท้าย
 // การเรียก Next() หลังจากนี้จะเลื่อนไปยังรายการสุดท้าย
 // หาก list ว่างเปล่า, จะเลื่อน Iterator ไปยังตำแหน่งเริ่มต้น
-func (it *Iterator[K, V]) SeekToLast() {
+func (it *Iterator[K, V]) SeekToLast() bool {
 	if !it.unsafe {
 		it.sl.mutex.RLock()
 		defer it.sl.mutex.RUnlock()
@@ -215,12 +224,13 @@ func (it *Iterator[K, V]) SeekToLast() {
 	// If the list is empty, lastNode is the header. Position before the start.
 	if lastNode == it.sl.header {
 		it.current = it.sl.header
-		return
+		return false
 	}
 
 	// The node before the last node is its backward pointer.
 	// This will correctly be the header if there is only one element.
 	it.current = lastNode.backward
+	return true
 }
 
 // Seek positions the iterator just before the first element with a key greater than or equal to the given key.

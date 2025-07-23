@@ -885,14 +885,18 @@ func TestSkipList_Iterator(t *testing.T) {
 
 			t.Run("SeekToFirst", func(t *testing.T) {
 				it := sl.NewIterator()
-				it.SeekToFirst() // same as Reset
+				if !it.SeekToFirst() {
+					t.Fatal("SeekToFirst() on non-empty list returned false")
+				}
 				if !it.Next() || it.Key() != 10 {
 					t.Errorf("SeekToFirst failed: Expected to get key 10 after Next(), but got something else")
 				}
 
 				// Test on empty list
 				emptyIt := setup.constructor(nil).NewIterator()
-				emptyIt.SeekToFirst()
+				if emptyIt.SeekToFirst() {
+					t.Error("SeekToFirst() on empty list should return false")
+				}
 				if emptyIt.Next() {
 					t.Error("Next() after SeekToFirst() on empty list should return false")
 				}
@@ -900,7 +904,9 @@ func TestSkipList_Iterator(t *testing.T) {
 
 			t.Run("SeekToLast", func(t *testing.T) {
 				it := sl.NewIterator()
-				it.SeekToLast()
+				if !it.SeekToLast() {
+					t.Fatal("SeekToLast() on non-empty list returned false")
+				}
 				if !it.Next() || it.Key() != 50 {
 					t.Errorf("SeekToLast failed: Expected to get key 50 after Next(), but got %v", it.Key())
 				}
@@ -911,7 +917,9 @@ func TestSkipList_Iterator(t *testing.T) {
 
 				// Test on empty list
 				emptyIt := setup.constructor(nil).NewIterator()
-				emptyIt.SeekToLast()
+				if emptyIt.SeekToLast() {
+					t.Error("SeekToLast() on empty list should return false")
+				}
 				if emptyIt.Next() {
 					t.Error("Next() after SeekToLast() on empty list should return false")
 				}
@@ -920,7 +928,9 @@ func TestSkipList_Iterator(t *testing.T) {
 				singleSl := setup.constructor(nil)
 				singleSl.Insert(100, "hundred")
 				singleIt := singleSl.NewIterator()
-				singleIt.SeekToLast()
+				if !singleIt.SeekToLast() {
+					t.Fatal("SeekToLast() on single-element list returned false")
+				}
 				if !singleIt.Next() || singleIt.Key() != 100 {
 					t.Errorf("SeekToLast on single-element list failed: expected key 100, got %v", singleIt.Key())
 				}
