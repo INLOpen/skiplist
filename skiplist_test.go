@@ -22,9 +22,9 @@ func getTestSetups[K cmp.Ordered, V any]() []testSetup[K, V] {
 			name: "WithPool",
 			constructor: func(compare Comparator[K], opts ...Option[K, V]) *SkipList[K, V] {
 				if compare == nil {
-					return New[K, V](opts...)
+					return New(opts...)
 				}
-				return NewWithComparator[K, V](compare, opts...)
+				return NewWithComparator(compare, opts...)
 			},
 		},
 		{
@@ -33,9 +33,9 @@ func getTestSetups[K cmp.Ordered, V any]() []testSetup[K, V] {
 				arenaSize := 1024 * 1024 // 1MB Arena for tests
 				allOpts := append([]Option[K, V]{WithArena[K, V](arenaSize)}, opts...)
 				if compare == nil {
-					return New[K, V](allOpts...)
+					return New(allOpts...)
 				}
-				return NewWithComparator[K, V](compare, allOpts...)
+				return NewWithComparator(compare, allOpts...)
 			},
 		},
 	}
@@ -880,6 +880,52 @@ func TestSkipList_Iterator(t *testing.T) {
 				emptyIt := setup.constructor(nil).NewIterator()
 				if emptyIt.Last() {
 					t.Error("Last() on empty list should return false")
+				}
+			})
+
+			t.Run("SeekToFirst", func(t *testing.T) {
+				it := sl.NewIterator()
+				it.SeekToFirst() // same as Reset
+				if !it.Next() || it.Key() != 10 {
+					t.Errorf("SeekToFirst failed: Expected to get key 10 after Next(), but got something else")
+				}
+
+				// Test on empty list
+				emptyIt := setup.constructor(nil).NewIterator()
+				emptyIt.SeekToFirst()
+				if emptyIt.Next() {
+					t.Error("Next() after SeekToFirst() on empty list should return false")
+				}
+			})
+
+			t.Run("SeekToLast", func(t *testing.T) {
+				it := sl.NewIterator()
+				it.SeekToLast()
+				if !it.Next() || it.Key() != 50 {
+					t.Errorf("SeekToLast failed: Expected to get key 50 after Next(), but got %v", it.Key())
+				}
+				// Calling Next() again should fail
+				if it.Next() {
+					t.Errorf("Next() after reaching last element should return false, but got true with key %v", it.Key())
+				}
+
+				// Test on empty list
+				emptyIt := setup.constructor(nil).NewIterator()
+				emptyIt.SeekToLast()
+				if emptyIt.Next() {
+					t.Error("Next() after SeekToLast() on empty list should return false")
+				}
+
+				// Test on list with one element
+				singleSl := setup.constructor(nil)
+				singleSl.Insert(100, "hundred")
+				singleIt := singleSl.NewIterator()
+				singleIt.SeekToLast()
+				if !singleIt.Next() || singleIt.Key() != 100 {
+					t.Errorf("SeekToLast on single-element list failed: expected key 100, got %v", singleIt.Key())
+				}
+				if singleIt.Next() {
+					t.Error("Next() after SeekToLast() on single-element list should return false")
 				}
 			})
 

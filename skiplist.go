@@ -71,7 +71,7 @@ func WithArena[K any, V any](sizeInBytes int) Option[K, V] {
 // New สร้าง skiplist ใหม่สำหรับ key type ที่รองรับ `cmp.Ordered` (เช่น int, string)
 // โดยจะใช้ `cmp.Compare` เป็นฟังก์ชันเปรียบเทียบโดยอัตโนมัติ
 func New[K cmp.Ordered, V any](opts ...Option[K, V]) *SkipList[K, V] {
-	return NewWithComparator[K, V](cmp.Compare[K], opts...)
+	return NewWithComparator(cmp.Compare[K], opts...)
 }
 
 // NewWithComparator creates a new skiplist with a custom comparator function.

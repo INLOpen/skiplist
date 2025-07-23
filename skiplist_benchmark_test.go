@@ -96,7 +96,7 @@ func BenchmarkInsertN_WithArena(b *testing.B) {
 
 	for i := 0; i < b.N; i++ {
 		// ในแต่ละรอบของ benchmark, สร้าง list ใหม่พร้อม Arena และเติมข้อมูลเข้าไป
-		sl := New[int, int](WithArena[int, int](arenaSizeBytes)) // ใช้ Functional Option
+		sl := New(WithArena[int, int](arenaSizeBytes)) // ใช้ Functional Option
 		for j := 0; j < insertBenchmarkSize; j++ {
 			sl.Insert(keys[j], keys[j])
 		}
@@ -132,7 +132,7 @@ func BenchmarkSkipList_Delete(b *testing.B) {
 				if arenaSize < 1024*1024 { // Set a minimum size
 					arenaSize = 1024 * 1024
 				}
-				sl = New[int, int](WithArena[int, int](arenaSize))
+				sl = New(WithArena[int, int](arenaSize))
 			} else {
 				// For Pool, the default constructor is fine.
 				sl = setup.constructor(nil)
