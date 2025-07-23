@@ -182,6 +182,47 @@ func (it *Iterator[K, V]) Last() bool {
 	return true
 }
 
+// SeekToFirst positions the iterator just before the first element.
+// A subsequent call to Next() will advance the iterator to the first element.
+// This is an alias for Reset().
+// SeekToFirst เลื่อน Iterator ไปยังตำแหน่งก่อนหน้าของรายการแรก
+// การเรียก Next() หลังจากนี้จะเลื่อนไปยังรายการแรก
+// เป็นฟังก์ชันที่ทำงานเหมือนกับ Reset()
+func (it *Iterator[K, V]) SeekToFirst() {
+	it.Reset()
+}
+
+// SeekToLast positions the iterator just before the last element.
+// A subsequent call to Next() will advance the iterator to the last element.
+// If the list is empty, it positions the iterator at the beginning.
+// SeekToLast เลื่อน Iterator ไปยังตำแหน่งก่อนหน้าของรายการสุดท้าย
+// การเรียก Next() หลังจากนี้จะเลื่อนไปยังรายการสุดท้าย
+// หาก list ว่างเปล่า, จะเลื่อน Iterator ไปยังตำแหน่งเริ่มต้น
+func (it *Iterator[K, V]) SeekToLast() {
+	if !it.unsafe {
+		it.sl.mutex.RLock()
+		defer it.sl.mutex.RUnlock()
+	}
+
+	// Find the last node, same logic as Last()
+	lastNode := it.sl.header
+	for i := it.sl.level; i >= 0; i-- {
+		for lastNode.forward[i] != nil {
+			lastNode = lastNode.forward[i]
+		}
+	}
+
+	// If the list is empty, lastNode is the header. Position before the start.
+	if lastNode == it.sl.header {
+		it.current = it.sl.header
+		return
+	}
+
+	// The node before the last node is its backward pointer.
+	// This will correctly be the header if there is only one element.
+	it.current = lastNode.backward
+}
+
 // Seek positions the iterator just before the first element with a key greater than or equal to the given key.
 // A subsequent call to Next() will advance the iterator to that element.
 // Seek เลื่อน Iterator ไปยังตำแหน่งก่อนหน้าของรายการที่มี key เท่ากับหรือมากกว่า key ที่กำหนด
