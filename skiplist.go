@@ -42,14 +42,15 @@ type Comparator[K any] func(a, b K) int
 // SkipList คือโครงสร้างหลักของ skiplist
 // ค่า zero value ของ SkipList จะยังไม่พร้อมใช้งาน, ต้องสร้างผ่านฟังก์ชัน New... เท่านั้น
 type SkipList[K any, V any] struct {
-	header      *node[K, V]         // โหนดเริ่มต้น (sentinel node)
-	level       int                 // ชั้นสูงสุดที่มีอยู่ในปัจจุบัน
-	length      int                 // จำนวนรายการทั้งหมดใน skiplist
-	rand        *rand.Rand          // ตัวสร้างเลขสุ่มสำหรับกำหนดชั้น
-	mutex       sync.RWMutex        // Mutex สำหรับการทำงานแบบ concurrent-safe
-	updateCache []INode[K, V]       // แคชสำหรับ update path
-	allocator   nodeAllocator[K, V] // Abstraction สำหรับการจัดสรรหน่วยความจำ
-	compare     Comparator[K]       // ฟังก์ชันสำหรับเปรียบเทียบ key
+	header           *node[K, V]         // โหนดเริ่มต้น (sentinel node)
+	level            int                 // ชั้นสูงสุดที่มีอยู่ในปัจจุบัน
+	length           int                 // จำนวนรายการทั้งหมดใน skiplist
+	rand             *rand.Rand          // ตัวสร้างเลขสุ่มสำหรับกำหนดชั้น
+	mutex            sync.RWMutex        // Mutex สำหรับการทำงานแบบ concurrent-safe
+	updateCacheRanks []int               // แคชสำหรับ rank ที่ใช้ใน Insert
+	updateCache      []INode[K, V]       // แคชสำหรับ update path
+	allocator        nodeAllocator[K, V] // Abstraction สำหรับการจัดสรรหน่วยความจำ
+	compare          Comparator[K]       // ฟังก์ชันสำหรับเปรียบเทียบ key
 }
 
 // Option is a function that configures a SkipList.
@@ -88,6 +89,7 @@ func NewWithComparator[K any, V any](compare Comparator[K], opts ...Option[K, V]
 	// แต่มีตัวชี้ครบทุกชั้น
 	header := &node[K, V]{
 		forward: make([]*node[K, V], MaxLevel),
+		span:    make([]int, MaxLevel),
 	}
 
 	// ใช้ PCG (Permuted Congruential Generator) ซึ่งเป็น default ใน Go 1.22+
@@ -95,13 +97,14 @@ func NewWithComparator[K any, V any](compare Comparator[K], opts ...Option[K, V]
 	source := rand.NewPCG(rand.Uint64(), rand.Uint64())
 
 	sl := &SkipList[K, V]{
-		header:      header,
-		level:       0, // เริ่มต้นที่ชั้น 0
-		length:      0,
-		rand:        rand.New(source),
-		updateCache: make([]INode[K, V], MaxLevel),
-		allocator:   newPoolAllocator[K, V](), // Default to sync.Pool
-		compare:     compare,
+		header:           header,
+		level:            0, // เริ่มต้นที่ชั้น 0
+		length:           0,
+		rand:             rand.New(source),
+		updateCacheRanks: make([]int, MaxLevel),
+		updateCache:      make([]INode[K, V], MaxLevel),
+		allocator:        newPoolAllocator[K, V](), // Default to sync.Pool
+		compare:          compare,
 	}
 
 	// Apply any custom options provided by the user
@@ -173,15 +176,28 @@ func (sl *SkipList[K, V]) Insert(key K, value V) INode[K, V] {
 	// update เป็น slice ที่เก็บโหนดที่จะต้องอัปเดตตัวชี้ forward
 	// ในแต่ละชั้นเมื่อมีการเพิ่มโหนดใหม่
 	update := sl.updateCache
+	ranks := sl.updateCacheRanks
 	current := sl.header
 
 	// ค้นหาตำแหน่งที่จะเพิ่มโหนดใหม่ พร้อมทั้งบันทึกโหนดที่จะต้องอัปเดต
+	// และคำนวณ rank ไปพร้อมกัน
 	for i := sl.level; i >= 0; i-- {
+		// rank ที่ชั้น i คือ rank ที่คำนวณได้จากชั้น i+1
+		if i == sl.level {
+			ranks[i] = 0
+		} else {
+			ranks[i] = ranks[i+1]
+		}
+
 		for current.forward[i] != nil && sl.compare(current.forward[i].key, key) < 0 {
+			ranks[i] += current.span[i]
 			current = current.forward[i]
 		}
 		update[i] = current
 	}
+
+	// rank ของโหนดก่อนหน้าคือ ranks[0]
+	// rank ของโหนดใหม่ (0-based) คือ ranks[0]
 
 	current = current.forward[0]
 
@@ -200,7 +216,14 @@ func (sl *SkipList[K, V]) Insert(key K, value V) INode[K, V] {
 	// newLevel is 1-based, sl.level is 0-based
 	if newLevel-1 > sl.level {
 		for i := sl.level + 1; i < newLevel; i++ {
+			// สำหรับชั้นใหม่ๆ, update path จะเริ่มจาก header
 			update[i] = sl.header
+			// rank ที่ชั้นเหล่านี้จะเริ่มต้นที่ 0
+			ranks[i] = 0
+			// span ของ header ในชั้นใหม่นี้จะต้องครอบคลุมโหนดทั้งหมดที่มีอยู่
+			// เพราะ pointer ของมันจะชี้ไปที่ nil (ก่อนที่จะถูกเชื่อมกับโหนดใหม่)
+			// ดังนั้น span ของมันคือจำนวนโหนดทั้งหมดใน list
+			sl.header.span[i] = sl.length
 		}
 		sl.level = newLevel - 1
 	}
@@ -213,21 +236,37 @@ func (sl *SkipList[K, V]) Insert(key K, value V) INode[K, V] {
 	// สำหรับ Pool, `Get` จะคืนโหนดที่อาจมี slice เก่ามาด้วย ซึ่งเราสามารถใช้ซ้ำได้
 	if cap(newNode.forward) < newLevel {
 		newNode.forward = make([]*node[K, V], newLevel)
+		newNode.span = make([]int, newLevel)
 	} else {
 		newNode.forward = newNode.forward[:newLevel]
+		newNode.span = newNode.span[:newLevel]
 	}
 
 	newNode.key = key
 	newNode.value = value
 
 	// เชื่อมโหนดใหม่เข้ากับ skiplist ในแต่ละชั้น
+	// พร้อมทั้งอัปเดตค่า span
 	for i := 0; i < newLevel; i++ {
 		cupdate, ok := update[i].(*node[K, V])
 		if !ok {
 			continue
 		}
+		// เชื่อม forward pointer
 		newNode.forward[i] = cupdate.forward[i]
 		cupdate.forward[i] = newNode
+
+		// อัปเดต span
+		// newSpan คือระยะห่างจาก cupdate ไปยัง newNode
+		newSpan := (ranks[0] - ranks[i]) + 1
+		newNode.span[i] = cupdate.span[i] - (newSpan - 1)
+		cupdate.span[i] = newSpan
+	}
+
+	// สำหรับชั้นที่สูงกว่า newLevel, เราแค่เพิ่ม span ของโหนดใน update path
+	// เพราะมีโหนดใหม่เพิ่มเข้ามาในเส้นทางนั้น
+	for i := newLevel; i <= sl.level; i++ {
+		update[i].(*node[K, V]).span[i]++
 	}
 
 	// ตั้งค่า backward pointer สำหรับ doubly-linked list ที่ชั้น 0
@@ -252,15 +291,20 @@ func (sl *SkipList[K, V]) deleteNode(nodeToRemove INode[K, V], update []INode[K,
 	}
 
 	for i := 0; i <= sl.level; i++ {
-		cupdate, ok1 := update[i].(*node[K, V])
-		if !ok1 {
-			continue
+		cupdate, _ := update[i].(*node[K, V])
+		if cupdate.forward[i] == cnodeRemove {
+			// ถ้าโหนดใน update path ชี้ไปยังโหนดที่จะลบโดยตรง
+			// ให้รวม span ของโหนดที่ถูกลบเข้ามา แล้วลบออก 1 (ตัวโหนดเอง)
+			cupdate.span[i] += cnodeRemove.span[i] - 1
+			cupdate.forward[i] = cnodeRemove.forward[i]
+		} else {
+			// ถ้าโหนดใน update path อยู่ในชั้นที่สูงกว่าโหนดที่จะลบ
+			// และไม่ได้ชี้ไปยังโหนดนั้นโดยตรง (ทางเดินมัน "ข้าม" โหนดที่จะลบไป)
+			// เราแค่ลด span ลง 1 เพราะมีโหนดหายไปจาก list
+			if cupdate.forward[i] != nil {
+				cupdate.span[i]--
+			}
 		}
-
-		if cupdate.forward[i] != cnodeRemove {
-			break
-		}
-		cupdate.forward[i] = cnodeRemove.forward[i]
 	}
 
 	// ลดระดับของ skiplist หากชั้นบนสุดว่างลง
@@ -613,6 +657,30 @@ func (sl *SkipList[K, V]) PopMin() (INode[K, V], bool) {
 	return &node[K, V]{key: poppedKey, value: poppedValue}, true
 }
 
+// Rank returns the 0-based rank of the given key.
+// The rank is the number of elements with keys strictly smaller than the given key.
+// If the key is not in the list, it returns the rank it would have if it were inserted.
+// The complexity is O(log n).
+// Rank คืนค่าอันดับ (0-based) ของ key ที่กำหนด
+// อันดับคือจำนวนรายการที่มี key น้อยกว่า key ที่ระบุ
+// หากไม่พบ key จะคืนค่าอันดับที่ควรจะเป็นหากมีการเพิ่ม key นั้นเข้าไป
+// มีความซับซ้อน O(log n)
+func (sl *SkipList[K, V]) Rank(key K) int {
+	sl.mutex.RLock()
+	defer sl.mutex.RUnlock()
+
+	rank := 0
+	current := sl.header
+
+	for i := sl.level; i >= 0; i-- {
+		for current.forward[i] != nil && sl.compare(current.forward[i].key, key) < 0 {
+			rank += current.span[i]
+			current = current.forward[i]
+		}
+	}
+	return rank
+}
+
 // PopMax ดึง key-value คู่ที่มี key มากที่สุดออกจาก skiplist และลบโหนดนั้นออก
 // PopMax removes and returns the largest key-value pair from the skiplist.
 // It returns a node containing the popped data and true if an item was popped,
@@ -626,23 +694,21 @@ func (sl *SkipList[K, V]) PopMax() (INode[K, V], bool) {
 		return nil, false
 	}
 
-	// --- ขั้นตอนที่ 1: ค้นหาโหนดสุดท้าย (Max Node) ---
-	// ใช้ตรรกะเดียวกับฟังก์ชัน Max() เพื่อหาโหนดที่อยู่ท้ายสุดของ list
-	// ซึ่งเป็นโหนดที่เราต้องการจะลบ
-	nodeToRemove := sl.header
+	// --- ขั้นตอนที่ 1: ค้นหาโหนดสุดท้าย (Max Node) เพื่อหา key ---
+	// การทำ 2-pass (หา key ก่อน แล้วค่อยหา update path) อาจมีประสิทธิภาพด้อยกว่าเล็กน้อย
+	// แต่ช่วยให้ตรรกะการลบสอดคล้องกับฟังก์ชัน Delete และลดความซับซ้อน
+	// ทำให้การอัปเดต span ถูกต้องและง่ายต่อการตรวจสอบ
+	lastNode := sl.header
 	for i := sl.level; i >= 0; i-- {
-		for nodeToRemove.forward[i] != nil {
-			nodeToRemove = nodeToRemove.forward[i]
+		for lastNode.forward[i] != nil {
+			lastNode = lastNode.forward[i]
 		}
 	}
+	keyToRemove := lastNode.key
 
-	// --- ขั้นตอนที่ 2: ค้นหา update path สำหรับโหนดที่จะลบ ---
-	// เมื่อเราได้ nodeToRemove แล้ว เราจะใช้ key ของมันเพื่อค้นหา update path
-	// โดยใช้ตรรกะการค้นหาแบบมาตรฐานเหมือนในฟังก์ชัน Delete
-	// วิธีนี้ทำให้โค้ดมีความสอดคล้องและเข้าใจง่ายขึ้น
+	// --- ขั้นตอนที่ 2: ค้นหา update path สำหรับ key ที่จะลบ (เหมือนในฟังก์ชัน Delete) ---
 	update := sl.updateCache
 	current := sl.header
-	keyToRemove := nodeToRemove.key
 	for i := sl.level; i >= 0; i-- {
 		for current.forward[i] != nil && sl.compare(current.forward[i].key, keyToRemove) < 0 {
 			current = current.forward[i]
@@ -651,10 +717,38 @@ func (sl *SkipList[K, V]) PopMax() (INode[K, V], bool) {
 	}
 
 	// --- ขั้นตอนที่ 3: ดึงข้อมูลและลบโหนด ---
+	nodeToRemove := current.forward[0]
+
 	// ดึง Key และ Value ออกมาก่อนที่โหนดจะถูกเคลียร์โดย deleteNode
-	poppedKey := nodeToRemove.key     // ใช้ข้อมูลจาก nodeToRemove ที่หาไว้
-	poppedValue := nodeToRemove.value // ใช้ข้อมูลจาก nodeToRemove ที่หาไว้
+	poppedKey := nodeToRemove.key
+	poppedValue := nodeToRemove.value
 
 	sl.deleteNode(nodeToRemove, update)
 	return &node[K, V]{key: poppedKey, value: poppedValue}, true
+}
+
+// GetByRank returns the node at the given 0-based rank.
+// If the rank is out of bounds (rank < 0 or rank >= sl.Len()), it returns nil and false.
+// The complexity is O(log n).
+// GetByRank คืนค่าโหนด ณ อันดับที่กำหนด (0-based)
+// หากอันดับอยู่นอกขอบเขต (น้อยกว่า 0 หรือมากกว่าหรือเท่ากับ Len()) จะคืนค่า nil และ false
+// มีความซับซ้อน O(log n)
+func (sl *SkipList[K, V]) GetByRank(rank int) (INode[K, V], bool) {
+	sl.mutex.RLock()
+	defer sl.mutex.RUnlock()
+
+	if rank < 0 || rank >= sl.length {
+		return nil, false
+	}
+
+	var traversed int = -1 // Header is at rank -1
+	current := sl.header
+
+	for i := sl.level; i >= 0; i-- {
+		for current.forward[i] != nil && (traversed+current.span[i]) <= rank {
+			traversed += current.span[i]
+			current = current.forward[i]
+		}
+	}
+	return current, true
 }
