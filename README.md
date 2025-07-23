@@ -64,7 +64,7 @@ import (
 func main() {
 	// Create a new skiplist for int keys and string values.
 	// The default comparator (cmp.Compare) is used automatically.
-	sl := skiplist.Newint, string
+	sl := skiplist.New[int, string]()
 
 	sl.Insert(10, "ten")
 	sl.Insert(20, "twenty")
@@ -109,8 +109,8 @@ func main() {
 	// For maximum performance, create a skiplist with a 128MB memory arena.
 	// This is ideal for scenarios where you insert a large number of items
 	// and want to minimize garbage collection overhead.
-	arenaOpt := skiplist.WithArenaint, string
-	sl := skiplist.Newint, string
+	arenaOpt := skiplist.WithArena[int, string](128 * 1024 * 1024) // 128MB
+	sl := skiplist.New[int, string](arenaOpt)
 
 	// Operations are the same
 	sl.Insert(1, "one")
@@ -148,7 +148,7 @@ func userComparator(a, b User) int {
 
 func main() {
 	// Create a skiplist with a custom comparator
-	sl := skiplist.NewWithComparatorUser, string
+	sl := skiplist.NewWithComparator[User, string](userComparator)
 
 	sl.Insert(User{ID: 2, Name: "Bob"}, "Engineer")
 	sl.Insert(User{ID: 1, Name: "Alice"}, "Manager")
@@ -175,7 +175,7 @@ import (
 )
 
 func main() {
-	sl := skiplist.Newint, string
+	sl := skiplist.New[int, string]()
 	sl.Insert(10, "A")
 	sl.Insert(20, "B")
 	sl.Insert(30, "C")
@@ -212,6 +212,7 @@ func main() {
 *   `(sl *SkipList[K, V]) Search(key K) (INode[K, V], bool)`
 *   `(sl *SkipList[K, V]) Delete(key K) bool`
 *   `(sl *SkipList[K, V]) Len() int`
+*   `(sl *SkipList[K, V]) Clear()`
 
 ### Ordered Operations
 *   `(sl *SkipList[K, V]) Min() (INode[K, V], bool)`
@@ -237,6 +238,8 @@ func main() {
 *   `(it *Iterator[K, V]) Seek(key K)`
 *   `(it *Iterator[K, V]) First() bool`
 *   `(it *Iterator[K, V]) Last() bool`
+*   `(it *Iterator[K, V]) SeekToFirst()`
+*   `(it *Iterator[K, V]) SeekToLast()`
 *   `(it *Iterator[K, V]) Reset()`
 *   `(it *Iterator[K, V]) Clone() *Iterator[K, V]`
 
