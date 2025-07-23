@@ -6,6 +6,18 @@ A thread-safe, high-performance, generic skiplist implementation in Go.
 
 This library provides a skiplist data structure that is easy to use, highly efficient, and flexible. It's designed to be a powerful alternative to Go's built-in `map` when you need sorted, ordered data access with logarithmic time complexity for search, insert, and delete operations.
 
+A skiplist maintains sorted order by using a hierarchy of linked lists. Lower levels have more elements, creating a dense index, while higher levels have fewer elements, acting as "express lanes" to skip over large portions of the list. This structure enables fast searching.
+
+```
+Level 3: 1-------------------------------->9
+          |                                |
+Level 2: 1--------->4--------------------->9
+          |          |                     |
+Level 1: 1--->2----->4--------->6--------->9
+          |   |      |          |         |
+Data:    (1) (2)    (4)        (6)       (9)
+```
+
 ## Features
 
 *   **🚀 High Performance**: O(log n) average time complexity for major operations.
@@ -18,6 +30,19 @@ This library provides a skiplist data structure that is easy to use, highly effi
 *   **✨ Rich API**: Includes a comprehensive set of methods like `RangeQuery`, `PopMin`, `PopMax`, `Predecessor`, `Successor`, and more.
 *   **🚶 Full-Featured Iterator**: Provides a powerful bidirectional iterator with `Seek`, `Next`, `Prev`, `First`, `Last`, `Reset`, etc., for flexible data traversal.
 
+## Why Use This Skip List?
+
+While Go's built-in `map` is excellent for general-purpose key-value storage, it does not maintain any order. This skiplist is superior in scenarios where sorted data is crucial.
+
+| Use Case | `map[K]V` | `sync.Map` | `This SkipList[K, V]` |
+|---|---|---|---|
+| **Unordered Key-Value** | ✅ **Best Choice** | ✅ (Concurrent) | (Overhead) |
+| **Ordered Iteration** | ❌ (Unordered) | ❌ (Unordered) | ✅ **Best Choice** |
+| **Find Min/Max Key** | ❌ (Requires full scan) | ❌ (Requires full scan) | ✅ **O(1)** |
+| **Range Queries (e.g., keys 10-50)** | ❌ (Requires full scan) | ❌ (Requires full scan) | ✅ **O(log n + k)** |
+| **Find Predecessor/Successor** | ❌ (Unordered) | ❌ (Unordered) | ✅ **O(log n)** |
+| **Fine-grained GC Control** | ❌ | ❌ | ✅ (via `sync.Pool` or Arena) |
+
 ## Performance
 
 This skiplist offers two memory allocation strategies, each with distinct performance characteristics.
@@ -26,20 +51,19 @@ This skiplist offers two memory allocation strategies, each with distinct perfor
 *   **`Memory Arena` (Optional)**: This is the high-throughput choice. By pre-allocating a large, contiguous block of memory, it nearly eliminates GC overhead for node allocations, resulting in lower and more predictable latency for bulk operations. It uses more memory upfront and is less ideal for high-churn workloads where nodes are not reclaimed individually.
 
 **Conclusion**:
-*   Use the **default `sync.Pool`** for general-purpose use and high-churn scenarios.
-*   Use the **`Memory Arena`** when you need the absolute lowest latency for bulk inserts/deletes and can predict memory usage.
-*   Choose this skiplist over a `map` when you need **sorted data**, **ordered iteration (Range queries)**, or **fine-grained control over memory allocation and GC pressure**.
+*   Use the **default `sync.Pool`** for general-purpose use and high-churn scenarios (frequent inserts/deletes).
+*   Use the **`Memory Arena`** for the absolute lowest latency during bulk inserts/reads, especially when you can predict memory usage.
 
 *Results on `13th Gen Intel(R) Core(TM) i9-13900H`*
 
 | Benchmark (ns/op) | `sync.Pool` (Default) | `Memory Arena` | Notes |
 |---|---|---|---|
-| **Bulk Insert (100k items)** | 106,216,625 | 120,044,970 | Time to insert 100k items |
-| **Search (avg)** | 286.1 | 351.8 | Average time per search |
-| **Delete (avg)** | 2,446 | 2,227 | Average time per delete |
-| **Ordered Iteration (10k items)** | 213,295 | 181,974 | Time for full scan with `RangeWithIterator` |
-| **Churn (delete/insert)** | 271.3 | N/A | Arena not designed for this workload |
-| **Warm Insert (1 op)** | 84.50 | N/A | Highlights `sync.Pool`'s reuse speed |
+| **Bulk Insert (100k items)** | 106,216,625 | 120,044,970 | Total time to insert 100,000 items |
+| **Search (avg)** | 286.1 | 351.8 | Average time per search in a list of 100k items |
+| **Delete (avg)** | 2,446 | 2,227 | Average time per delete in a list of 100k items |
+| **Ordered Iteration (10k items)** | 213,295 | 181,974 | Total time to iterate over 10,000 items |
+| **Churn (delete/insert)** | 271.3 | N/A | Arena is not optimized for high churn; no node reclamation |
+| **Warm Insert (1 op)** | 84.50 | N/A | `sync.Pool` excels at reusing nodes for single inserts |
 
 ## Installation
 
@@ -162,6 +186,37 @@ func main() {
 }
 ```
 
+### Concurrent Usage
+
+The skiplist is safe for concurrent use. You can have multiple goroutines reading and writing to the list simultaneously without external locking.
+
+```go
+package main
+
+import (
+	"fmt"
+	"github.com/INLOpen/skiplist"
+	"sync"
+)
+
+func main() {
+	sl := skiplist.New[int, int]()
+	var wg sync.WaitGroup
+
+	// Concurrently insert 1000 items
+	for i := 0; i < 1000; i++ {
+		wg.Add(1)
+		go func(val int) {
+			defer wg.Done()
+			sl.Insert(val, val*10)
+		}(i)
+	}
+
+	wg.Wait()
+	fmt.Printf("After concurrent inserts, length is: %d\n", sl.Len()) // 1000
+}
+```
+
 ### Iterator Usage
 
 The iterator provides fine-grained control over list traversal.
@@ -205,7 +260,7 @@ func main() {
 *   `NewWithComparator[K any, V any](compare Comparator[K], opts ...Option[K, V]) *SkipList[K, V]`
 
 ### Configuration Options
-*   `WithArenaK any, V any Option[K, V]`
+*   `WithArenaK, V Option[K, V]`
 
 ### Basic Operations
 *   `(sl *SkipList[K, V]) Insert(key K, value V) INode[K, V]`
@@ -235,11 +290,11 @@ func main() {
 *   `(it *Iterator[K, V]) Prev() bool`
 *   `(it *Iterator[K, V]) Key() K`
 *   `(it *Iterator[K, V]) Value() V`
-*   `(it *Iterator[K, V]) Seek(key K)`
+*   `(it *Iterator[K, V]) Seek(key K) bool`
+*   `(it *Iterator[K, V]) SeekToFirst() bool`
+*   `(it *Iterator[K, V]) SeekToLast() bool`
 *   `(it *Iterator[K, V]) First() bool`
 *   `(it *Iterator[K, V]) Last() bool`
-*   `(it *Iterator[K, V]) SeekToFirst()`
-*   `(it *Iterator[K, V]) SeekToLast()`
 *   `(it *Iterator[K, V]) Reset()`
 *   `(it *Iterator[K, V]) Clone() *Iterator[K, V]`
 
