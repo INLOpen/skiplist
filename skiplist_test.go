@@ -267,6 +267,23 @@ func TestSkipListConcurrent(t *testing.T) {
 			if sl.Len() != expectedLen {
 				t.Fatalf("Expected length %d after concurrent deletes, got %d", expectedLen, sl.Len())
 			}
+
+			// --- ตรวจสอบความถูกต้องของข้อมูลหลังจากการลบ ---
+			// Verify that the correct keys were deleted and the correct ones remain.
+			for i := 0; i < numGoroutines; i++ {
+				for j := 0; j < itemsPerGoroutine; j++ {
+					key := i*itemsPerGoroutine + j
+					_, found := sl.Search(key)
+					shouldBeFound := (i%2 != 0) // Keys from odd-numbered goroutines should exist.
+					if found != shouldBeFound {
+						if shouldBeFound {
+							t.Errorf("Key %d should have been found, but was not", key)
+						} else {
+							t.Errorf("Key %d should have been deleted, but was found", key)
+						}
+					}
+				}
+			}
 		})
 	}
 }
@@ -866,6 +883,18 @@ func TestSkipList_Iterator(t *testing.T) {
 				}
 			})
 
+			t.Run("Reset reverse", func(t *testing.T) {
+				it := sl.NewIterator(WithReverse[int, string]())
+				it.Next() // Move to 50
+				it.Next() // Move to 40
+
+				it.Reset()
+				// After reset, the first call to Next() should yield the last element (50)
+				if !it.Next() || it.Key() != 50 {
+					t.Errorf("Reset on reverse iterator failed: Expected to get key 50 after reset and Next(), but got %v", it.Key())
+				}
+			})
+
 			t.Run("Seek on empty list", func(t *testing.T) {
 				emptyIt := setup.constructor(nil).NewIterator()
 				if emptyIt.Seek(100) {
@@ -921,6 +950,21 @@ func TestSkipList_Iterator(t *testing.T) {
 				// After a failed seek, the iterator should be exhausted.
 				if it.Next() {
 					t.Errorf("Seek(55) failed: Expected Next() to return false, but it returned true with key %v", it.Key())
+				}
+			})
+
+			t.Run("Seek with reverse iterator", func(t *testing.T) {
+				it := sl.NewIterator(WithReverse[int, string]())
+				if !it.Seek(35) { // Should seek to 40
+					t.Fatal("Seek(35) on reverse iterator should return true, but got false")
+				}
+				// Seek should position AT the ceiling key, regardless of direction
+				if it.Key() != 40 {
+					t.Errorf("Seek(35) on reverse iterator failed: Expected to be at key 40, but got %v", it.Key())
+				}
+				// Next() on a reverse iterator should move to the previous element
+				if !it.Next() || it.Key() != 30 {
+					t.Errorf("After Seek(35) and Next() on reverse iterator, expected to get key 30, but got %v", it.Key())
 				}
 			})
 
@@ -1020,7 +1064,7 @@ func TestSkipList_Iterator(t *testing.T) {
 				}
 			})
 
-			t.Run("Reverse iteration", func(t *testing.T) {
+			t.Run("Reverse iteration with Prev()", func(t *testing.T) {
 				it := sl.NewIterator()
 				var collectedKeys []int
 				expectedKeys := []int{50, 40, 30, 20, 10}
@@ -1035,6 +1079,25 @@ func TestSkipList_Iterator(t *testing.T) {
 					if !it.Prev() {
 						break
 					}
+				}
+
+				if len(collectedKeys) != len(expectedKeys) {
+					t.Fatalf("Reverse: Expected %d keys, got %d. Keys: %v", len(expectedKeys), len(collectedKeys), collectedKeys)
+				}
+				for i, k := range collectedKeys {
+					if k != expectedKeys[i] {
+						t.Errorf("Reverse: Expected key %d at index %d, got %d", expectedKeys[i], i, k)
+					}
+				}
+			})
+
+			t.Run("Reverse iteration with Next()", func(t *testing.T) {
+				it := sl.NewIterator(WithReverse[int, string]())
+				var collectedKeys []int
+				expectedKeys := []int{50, 40, 30, 20, 10}
+
+				for it.Next() {
+					collectedKeys = append(collectedKeys, it.Key())
 				}
 
 				if len(collectedKeys) != len(expectedKeys) {
@@ -1075,6 +1138,29 @@ func TestSkipList_Iterator(t *testing.T) {
 				}
 				if it1.Key() != 30 {
 					t.Errorf("Original iterator was affected by cloned's Next(), expected 30, got %v", it1.Key())
+				}
+			})
+
+			t.Run("Clone reverse iterator", func(t *testing.T) {
+				it1 := sl.NewIterator(WithReverse[int, string]())
+				it1.Next() // it1 is at 50
+				it1.Next() // it1 is at 40
+
+				it2 := it1.Clone() // it2 should also be at 40 and be in reverse mode
+
+				if it2.Key() != 40 {
+					t.Errorf("Cloned reverse iterator should be at key 40, but got %v", it2.Key())
+				}
+
+				// Advancing it2 should move it backwards in the list
+				it2.Next() // it2 is at 30
+				if it2.Key() != 30 {
+					t.Errorf("Cloned reverse iterator failed to advance to 30, got %v", it2.Key())
+				}
+
+				// The original should be unaffected
+				if it1.Key() != 40 {
+					t.Errorf("Original reverse iterator was affected by cloned's Next(), expected 40, got %v", it1.Key())
 				}
 			})
 		})

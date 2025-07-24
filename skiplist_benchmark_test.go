@@ -117,55 +117,23 @@ func BenchmarkMap_Search(b *testing.B) {
 	}
 }
 
-func BenchmarkSkipList_Delete(b *testing.B) {
-	for _, setup := range getTestSetups[int, int]() {
-		b.Run(setup.name, func(b *testing.B) {
-			b.StopTimer()
-
-			keys := generateRandomKeys(b.N)
-			var sl *SkipList[int, int]
-
-			if setup.name == "WithArena" {
-				// For Arena, we must calculate the size based on b.N to avoid OOM.
-				// Assuming ~400 bytes per node as a safe estimate.
-				arenaSize := b.N * 400
-				if arenaSize < 1024*1024 { // Set a minimum size
-					arenaSize = 1024 * 1024
-				}
-				sl = New(WithArena[int, int](arenaSize))
-			} else {
-				// For Pool, the default constructor is fine.
-				sl = setup.constructor(nil)
-			}
-
-			// Common setup: fill the list
-			for _, k := range keys {
-				sl.Insert(k, k)
-			}
-
-			b.StartTimer()
-
-			// Common benchmark loop: delete all N items.
-			// The benchmark framework will average the time per operation (per deletion).
-			for i := 0; i < b.N; i++ {
-				sl.Delete(keys[i])
-			}
-		})
-	}
-}
-
-func BenchmarkMap_Delete(b *testing.B) {
+// BenchmarkMap_Churn measures the performance of a map under high churn conditions
+// (frequent deletions and insertions) to provide a comparison for SkipList's churn performance.
+func BenchmarkMap_Churn(b *testing.B) {
 	keys := generateRandomKeys(benchmarkSize)
 	m := make(map[int]int)
 	b.StopTimer()
-	for j := 0; j < benchmarkSize; j++ {
-		m[keys[j]] = keys[j]
+	for _, key := range keys {
+		m[key] = key
 	}
 
 	b.StartTimer()
 	for i := 0; i < b.N; i++ {
-		delete(m, keys[i%benchmarkSize])
-		m[keys[i%benchmarkSize]] = keys[i%benchmarkSize]
+		keyToDelete := keys[i%benchmarkSize]
+		delete(m, keyToDelete)
+		// Insert a new key to avoid hitting the same memory location and better simulate churn.
+		keyToInsert := keyToDelete + (benchmarkSize * 10)
+		m[keyToInsert] = keyToInsert
 	}
 }
 
