@@ -5,7 +5,6 @@ import (
 	"testing"
 )
 
-const insertBenchmarkSize = 100000
 const benchmarkSize = 10000 // Increase size for more realistic benchmarks
 
 // generateRandomKeys generates a slice of unique random integers.
@@ -27,14 +26,19 @@ func generateRandomKeys(n int) []int {
 
 // BenchmarkSkipList_Insert measures the average performance of inserting a single element
 // into a skiplist that is growing from 0 to N elements.
+// This is the standard way to benchmark insertion performance.
 func BenchmarkSkipList_Insert(b *testing.B) {
-	b.StopTimer()
-	keys := generateRandomKeys(b.N)
-	sl := New[int, int]()
-	b.StartTimer()
+	for _, setup := range getTestSetups[int, int]() {
+		b.Run(setup.name, func(b *testing.B) {
+			b.StopTimer()
+			keys := generateRandomKeys(b.N)
+			sl := setup.constructor(nil)
+			b.StartTimer()
 
-	for i := 0; i < b.N; i++ {
-		sl.Insert(keys[i], i)
+			for i := 0; i < b.N; i++ {
+				sl.Insert(keys[i], i)
+			}
+		})
 	}
 }
 
@@ -66,40 +70,6 @@ func BenchmarkSkipList_Search(b *testing.B) {
 				_, _ = sl.Search(keys[i%benchmarkSize])
 			}
 		})
-	}
-}
-
-// BenchmarkInsertN_WithPool วัดประสิทธิภาพการเพิ่มข้อมูล N รายการโดยใช้ sync.Pool
-func BenchmarkInsertN_WithPool(b *testing.B) {
-	keys := generateRandomKeys(insertBenchmarkSize)
-	b.ReportAllocs()
-	b.ResetTimer()
-
-	for i := 0; i < b.N; i++ {
-		// ในแต่ละรอบของ benchmark, สร้าง list ใหม่และเติมข้อมูลเข้าไป
-		sl := New[int, int]() // ใช้ค่าเริ่มต้น (sync.Pool)
-		for j := 0; j < insertBenchmarkSize; j++ {
-			sl.Insert(keys[j], keys[j])
-		}
-	}
-}
-
-// BenchmarkInsertN_WithArena วัดประสิทธิภาพการเพิ่มข้อมูล N รายการโดยใช้ Memory Arena
-func BenchmarkInsertN_WithArena(b *testing.B) {
-	keys := generateRandomKeys(insertBenchmarkSize)
-	// ประเมินขนาดของ Arena ที่ต้องใช้คร่าวๆ
-	// ขนาด node struct + ขนาด slice header + ขนาด slice data (MaxLevel * 8 bytes)
-	// สมมติว่าประมาณ 400 bytes ต่อโหนดเพื่อความปลอดภัย
-	arenaSizeBytes := insertBenchmarkSize * 400
-	b.ReportAllocs()
-	b.ResetTimer()
-
-	for i := 0; i < b.N; i++ {
-		// ในแต่ละรอบของ benchmark, สร้าง list ใหม่พร้อม Arena และเติมข้อมูลเข้าไป
-		sl := New(WithArena[int, int](arenaSizeBytes)) // ใช้ Functional Option
-		for j := 0; j < insertBenchmarkSize; j++ {
-			sl.Insert(keys[j], keys[j])
-		}
 	}
 }
 
