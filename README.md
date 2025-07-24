@@ -23,7 +23,7 @@ Data:    (1) (2)    (4)        (6)       (9)
 *   **🚀 High Performance**: O(log n) average time complexity for major operations.
 *   **🧠 Memory Optimized**:
 	*   **`sync.Pool` (Default)**: Recycles nodes to reduce memory allocations and GC pressure, ideal for high-churn workloads.
-	*   **⚡️ Optional Memory Arena**: For maximum performance and minimal GC impact, an optional lock-free memory arena allocator can be enabled.
+	*   **⚡️ Optional Growable Memory Arena**: For maximum performance and minimal GC impact, an optional memory arena allocator can be enabled. It can grow automatically to accommodate more data, with configurable growth strategies.
 *   **⛓️ Generic**: Fully generic (`[K any, V any]`), allowing any type for keys and values.
 *   **🎛️ Customizable Sorting**: Supports custom comparator functions, enabling complex sorting logic for any key type (e.g., `structs`).
 *   **🤝 Thread-Safe**: All operations are safe for concurrent use from multiple goroutines.
@@ -45,25 +45,14 @@ While Go's built-in `map` is excellent for general-purpose key-value storage, it
 
 ## Performance
 
-This skiplist offers two memory allocation strategies, each with distinct performance characteristics.
+This skiplist offers two memory allocation strategies, each with distinct performance characteristics. You can run the benchmarks yourself via `go test -bench=.`.
 
 *   **`sync.Pool` (Default)**: This is the standard, memory-efficient choice. It excels in high-churn workloads (frequent inserts and deletes) by recycling nodes, which significantly reduces the garbage collector's workload.
-*   **`Memory Arena` (Optional)**: This is the high-throughput choice. By pre-allocating a large, contiguous block of memory, it nearly eliminates GC overhead for node allocations, resulting in lower and more predictable latency for bulk operations. It uses more memory upfront and is less ideal for high-churn workloads where nodes are not reclaimed individually.
+*   **`Memory Arena` (Optional)**: This is the high-throughput choice. It works by allocating memory from large, pre-allocated blocks called chunks. When a chunk is full, the arena can **grow automatically** by allocating a new, larger chunk, nearly eliminating GC overhead for node allocations. This results in lower and more predictable latency for bulk operations. You can configure the initial size, growth factor, and even a proactive growth threshold. It's less ideal for high-churn workloads where nodes are not reclaimed individually.
 
 **Conclusion**:
 *   Use the **default `sync.Pool`** for general-purpose use and high-churn scenarios (frequent inserts/deletes).
-*   Use the **`Memory Arena`** for the absolute lowest latency during bulk inserts/reads, especially when you can predict memory usage.
-
-*Results on `13th Gen Intel(R) Core(TM) i9-13900H`*
-
-| Benchmark (ns/op) | `sync.Pool` (Default) | `Memory Arena` | Notes |
-|---|---|---|---|
-| **Bulk Insert (100k items)** | 106,216,625 | 120,044,970 | Total time to insert 100,000 items |
-| **Search (avg)** | 286.1 | 351.8 | Average time per search in a list of 100k items |
-| **Delete (avg)** | 2,446 | 2,227 | Average time per delete in a list of 100k items |
-| **Ordered Iteration (10k items)** | 213,295 | 181,974 | Total time to iterate over 10,000 items |
-| **Churn (delete/insert)** | 271.3 | N/A | Arena is not optimized for high churn; no node reclamation |
-| **Warm Insert (1 op)** | 84.50 | N/A | `sync.Pool` excels at reusing nodes for single inserts |
+*   Use the **`Memory Arena`** for the absolute lowest latency during bulk inserts/reads.
 
 ## Installation
 
@@ -117,7 +106,7 @@ func main() {
 }
 ```
 
-### High-Performance Usage (with Memory Arena)
+### Basic Arena Usage
 
 For scenarios demanding the lowest possible latency, such as bulk loading data, you can enable the memory arena.
 
@@ -139,6 +128,40 @@ func main() {
 	// Operations are the same
 	sl.Insert(1, "one")
 	fmt.Println("Length with Arena:", sl.Len())
+}
+```
+
+### Advanced Arena Usage (with Automatic Growth)
+
+The memory arena can be configured to start small and grow automatically as needed.
+
+```go
+package main
+
+import (
+	"fmt"
+	"github.com/INLOpen/skiplist"
+)
+
+func main() {
+	// Configure an arena that starts small and grows automatically.
+	// This is useful when you don't know the exact memory usage upfront.
+	sl := skiplist.New[int, string](
+		// Start with a small 1KB arena.
+		skiplist.WithArena[int, string](1024),
+		// When the arena is full, grow it by a factor of 2.
+		skiplist.WithArenaGrowthFactor[int, string](2.0),
+		// Proactively grow when a chunk is 90% full to avoid fragmentation.
+		skiplist.WithArenaGrowthThreshold[int, string](0.9),
+	)
+
+	// Insert more data than the initial arena can hold to trigger growth.
+	for i := 0; i < 1000; i++ {
+		sl.Insert(i, fmt.Sprintf("value-%d", i))
+	}
+
+	fmt.Println("Successfully inserted 1000 items with a growing arena.")
+	fmt.Println("Final length:", sl.Len())
 }
 ```
 
@@ -258,9 +281,11 @@ func main() {
 ### Constructors
 *   `New[K cmp.Ordered, V any](opts ...Option[K, V]) *SkipList[K, V]`
 *   `NewWithComparator[K any, V any](compare Comparator[K], opts ...Option[K, V]) *SkipList[K, V]`
-
 ### Configuration Options
-*   `WithArenaK, V Option[K, V]`
+*   `WithArena[K, V](sizeInBytes int) Option[K, V]`
+*   `WithArenaGrowthFactor[K, V](factor float64) Option[K, V])`
+*   `WithArenaGrowthBytes[K, V](bytes int) Option[K, V]`
+*   `WithArenaGrowthThreshold[K, V](threshold float64) Option[K, V]`
 
 ### Basic Operations
 *   `(sl *SkipList[K, V]) Insert(key K, value V) INode[K, V]`

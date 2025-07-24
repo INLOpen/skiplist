@@ -50,6 +50,10 @@ type SkipList[K any, V any] struct {
 	updateCacheRanks []int               // แคชสำหรับ rank ที่ใช้ใน Insert
 	updateCache      []INode[K, V]       // แคชสำหรับ update path
 	allocator        nodeAllocator[K, V] // Abstraction สำหรับการจัดสรรหน่วยความจำ
+	arenaInitialSize int                 // ขนาดเริ่มต้นของ Arena (ถ้าใช้)
+	arenaGrowthFactor float64            // สัดส่วนการขยาย Arena (ถ้าใช้)
+	arenaGrowthBytes int                 // ขนาด byte คงที่ในการขยาย Arena (ถ้าใช้)
+	arenaGrowthThreshold float64        // Threshold สำหรับการขยาย Arena ล่วงหน้า (ถ้าใช้)
 	compare          Comparator[K]       // ฟังก์ชันสำหรับเปรียบเทียบ key
 }
 
@@ -58,12 +62,47 @@ type SkipList[K any, V any] struct {
 type Option[K any, V any] func(*SkipList[K, V])
 
 // WithArena configures the SkipList to use a memory arena of a given size in bytes.
-// This is a high-performance option that reduces GC pressure.
+// This sets the initial size of the arena. The arena can grow automatically if needed.
 // WithArena กำหนดให้ SkipList ใช้ memory arena ตามขนาดที่ระบุ (เป็น byte)
-// เป็นตัวเลือกประสิทธิภาพสูงที่ช่วยลดภาระของ GC
+// เป็นการกำหนดขนาดเริ่มต้น และ arena สามารถขยายขนาดได้เองเมื่อจำเป็น
 func WithArena[K any, V any](sizeInBytes int) Option[K, V] {
 	return func(sl *SkipList[K, V]) {
-		sl.allocator = newArenaAllocator[K, V](sizeInBytes)
+		if sizeInBytes > 0 {
+			sl.arenaInitialSize = sizeInBytes
+		}
+	}
+}
+
+// WithArenaGrowthFactor configures the arena to grow by a factor of the previous chunk's size.
+// For example, a factor of 2.0 means each new chunk will be twice as large as the last.
+// This option is only effective when used with WithArena.
+func WithArenaGrowthFactor[K any, V any](factor float64) Option[K, V] {
+	return func(sl *SkipList[K, V]) {
+		if factor > 1.0 {
+			sl.arenaGrowthFactor = factor
+		}
+	}
+}
+
+// WithArenaGrowthBytes configures the arena to grow by a fixed number of bytes.
+// This option is only effective when used with WithArena.
+func WithArenaGrowthBytes[K any, V any](bytes int) Option[K, V] {
+	return func(sl *SkipList[K, V]) {
+		if bytes > 0 {
+			sl.arenaGrowthBytes = bytes
+		}
+	}
+}
+
+// WithArenaGrowthThreshold configures the arena's proactive growth threshold (e.g., 0.9 for 90%).
+// If an allocation would cause a chunk's usage to exceed this threshold, the arena will
+// grow preemptively. This option is only effective when used with WithArena.
+func WithArenaGrowthThreshold[K any, V any](threshold float64) Option[K, V] {
+	return func(sl *SkipList[K, V]) {
+		// The arena itself validates the range, but we can check here too.
+		if threshold > 0.0 && threshold < 1.0 {
+			sl.arenaGrowthThreshold = threshold
+		}
 	}
 }
 
@@ -110,6 +149,21 @@ func NewWithComparator[K any, V any](compare Comparator[K], opts ...Option[K, V]
 	// Apply any custom options provided by the user
 	for _, opt := range opts {
 		opt(sl)
+	}
+
+	// After processing options, create the arena if requested.
+	if sl.arenaInitialSize > 0 {
+		var arenaOpts []ArenaOption
+		if sl.arenaGrowthBytes > 0 {
+			arenaOpts = append(arenaOpts, WithGrowthBytes(sl.arenaGrowthBytes))
+		}
+		if sl.arenaGrowthFactor > 1.0 {
+			arenaOpts = append(arenaOpts, WithGrowthFactor(sl.arenaGrowthFactor))
+		}
+		if sl.arenaGrowthThreshold > 0.0 {
+			arenaOpts = append(arenaOpts, WithGrowthThreshold(sl.arenaGrowthThreshold))
+		}
+		sl.allocator = newArenaAllocator[K, V](sl.arenaInitialSize, arenaOpts...)
 	}
 	return sl
 }
@@ -426,13 +480,9 @@ func (sl *SkipList[K, V]) RangeWithIterator(f func(it *Iterator[K, V])) {
 	sl.mutex.RLock()
 	defer sl.mutex.RUnlock()
 
-	// สร้าง iterator แบบ "unsafe" ที่ไม่ทำการ lock ภายในตัวเอง
-	// เพราะเรา lock จากภายนอกแล้ว
-	it := &Iterator[K, V]{
-		sl:      sl,
-		current: sl.header, // เริ่มต้นที่ header เพื่อให้ it.Next() ทำงานถูกต้อง
-		unsafe:  true,
-	}
+	// Create an "unsafe" iterator that doesn't perform its own locking,
+	// because we're already holding a read lock.
+	it := sl.NewIterator(withUnsafe[K, V]())
 	f(it)
 }
 
@@ -475,6 +525,23 @@ func (sl *SkipList[K, V]) Max() (INode[K, V], bool) {
 	return current, true
 }
 
+// findGreaterOrEqual finds the first node with a key >= the given key.
+// It returns nil if no such node is found.
+// The caller must hold a lock.
+// findGreaterOrEqual ค้นหาโหนดแรกที่มี key มากกว่าหรือเท่ากับ key ที่กำหนด
+// คืนค่า nil หากไม่พบโหนดดังกล่าว
+// ผู้เรียกต้องถือ lock อยู่แล้ว
+func (sl *SkipList[K, V]) findGreaterOrEqual(key K) *node[K, V] {
+	current := sl.header
+	for i := sl.level; i >= 0; i-- {
+		for current.forward[i] != nil && sl.compare(current.forward[i].key, key) < 0 {
+			current = current.forward[i]
+		}
+	}
+	// The next node is the first one with a key >= key.
+	return current.forward[0]
+}
+
 // RangeQuery วนลูปไปตามรายการที่ key อยู่ระหว่าง start และ end (รวมทั้งสองค่า)
 // RangeQuery iterates over items where the key is between start and end (inclusive).
 // The iteration stops if the provided function f returns false.
@@ -485,15 +552,7 @@ func (sl *SkipList[K, V]) RangeQuery(start, end K, f func(key K, value V) bool) 
 	defer sl.mutex.RUnlock()
 
 	// 1. ค้นหาโหนดเริ่มต้น (โหนดแรกที่มี key >= start)
-	// ใช้ตรรกะเดียวกับการค้นหาปกติเพื่อไปยังตำแหน่งที่ถูกต้องในเวลา O(log N)
-	current := sl.header
-	for i := sl.level; i >= 0; i-- {
-		for current.forward[i] != nil && sl.compare(current.forward[i].key, start) < 0 {
-			current = current.forward[i]
-		}
-	}
-	// เลื่อนไปยังโหนดแรกที่อาจจะอยู่ในช่วงที่กำหนด
-	current = current.forward[0]
+	current := sl.findGreaterOrEqual(start)
 
 	// 2. วนลูปไปข้างหน้าจนกว่า key จะเกินค่า end
 	for current != nil && sl.compare(current.key, end) <= 0 {
@@ -551,15 +610,8 @@ func (sl *SkipList[K, V]) CountRange(start, end K) int {
 	}
 
 	count := 0
-	current := sl.header
-
 	// 1. ค้นหาโหนดเริ่มต้น (โหนดแรกที่มี key >= start)
-	for i := sl.level; i >= 0; i-- {
-		for current.forward[i] != nil && sl.compare(current.forward[i].key, start) < 0 {
-			current = current.forward[i]
-		}
-	}
-	current = current.forward[0] // Move to the first node that might be in range
+	current := sl.findGreaterOrEqual(start)
 
 	// 2. วนลูปไปข้างหน้าจนกว่า key จะเกินค่า end
 	for current != nil && sl.compare(current.key, end) <= 0 {
@@ -608,21 +660,11 @@ func (sl *SkipList[K, V]) Successor(key K) (INode[K, V], bool) {
 func (sl *SkipList[K, V]) Seek(key K) (INode[K, V], bool) {
 	sl.mutex.RLock()
 	defer sl.mutex.RUnlock()
+	
+	node := sl.findGreaterOrEqual(key)
 
-	current := sl.header
-
-	// Find the node preceding the target position.
-	for i := sl.level; i >= 0; i-- {
-		for current.forward[i] != nil && sl.compare(current.forward[i].key, key) < 0 {
-			current = current.forward[i]
-		}
-	}
-
-	// The next node is the first one with a key >= key.
-	current = current.forward[0]
-
-	if current != nil {
-		return current, true
+	if node != nil {
+		return node, true
 	}
 
 	return nil, false

@@ -27,6 +27,20 @@ func (n *node[K, V]) Value() V {
 	return n.value
 }
 
+// reset clears the node's data so it can be safely reused by an allocator.
+// It clears pointers to prevent memory leaks and resets slices while retaining
+// their underlying capacity for performance.
+// reset เคลียร์ข้อมูลในโหนดเพื่อให้ allocator นำกลับมาใช้ใหม่ได้อย่างปลอดภัย
+// โดยจะล้างค่า pointer เพื่อป้องกัน memory leak และรีเซ็ต slice แต่ยังคง
+// backing array ไว้เพื่อประสิทธิภาพ
+func (n *node[K, V]) reset() {
+	var zeroK K
+	var zeroV V
+	n.key, n.value, n.backward = zeroK, zeroV, nil
+	clear(n.span)
+	clear(n.forward)
+}
+
 // --- Node Allocator Abstraction ---
 
 // nodeAllocator defines the interface for memory allocation strategies for nodes.
@@ -59,16 +73,8 @@ func (p *poolAllocator[K, V]) Get() *node[K, V] {
 }
 
 func (p *poolAllocator[K, V]) Put(n *node[K, V]) {
-	// เคลียร์ค่าในโหนดก่อนคืนเข้า pool เพื่อป้องกัน memory leak
-	var zeroK K
-	var zeroV V
-	n.key = zeroK
-	n.value = zeroV
-	n.backward = nil
-	// เคลียร์ slice ทั้งสองเพื่อล้างข้อมูลเก่า แต่ยังคงเก็บ backing array ไว้เพื่อนำกลับมาใช้ใหม่
-	// ซึ่งเป็นหัวใจสำคัญของการทำ pooling optimization
-	clear(n.span)
-	clear(n.forward)
+	// Reset the node to clear its contents before returning it to the pool.
+	n.reset()
 	p.pool.Put(n)
 }
 
@@ -85,9 +91,9 @@ type arenaAllocator[K any, V any] struct {
 	arena *Arena
 }
 
-func newArenaAllocator[K any, V any](sizeInBytes int) *arenaAllocator[K, V] {
+func newArenaAllocator[K any, V any](initialSize int, opts ...ArenaOption) *arenaAllocator[K, V] {
 	return &arenaAllocator[K, V]{
-		arena: NewArena(sizeInBytes),
+		arena: NewArena(initialSize, opts...),
 	}
 }
 
