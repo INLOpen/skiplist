@@ -23,7 +23,7 @@ type Iterator[K any, V any] struct {
 	sl      *SkipList[K, V] // อ้างอิงถึง Skiplist ที่กำลังวนลูป
 	current INode[K, V]     // โหนดปัจจุบันที่ Iterator ชี้อยู่
 	reverse bool
-	unsafe  bool            // ถ้าเป็น true, จะไม่ทำการ lock/unlock (ใช้สำหรับ RangeWithIterator)
+	unsafe  bool // ถ้าเป็น true, จะไม่ทำการ lock/unlock (ใช้สำหรับ RangeWithIterator)
 }
 
 // IteratorOption configures an Iterator.
