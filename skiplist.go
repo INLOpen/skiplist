@@ -42,19 +42,19 @@ type Comparator[K any] func(a, b K) int
 // SkipList คือโครงสร้างหลักของ skiplist
 // ค่า zero value ของ SkipList จะยังไม่พร้อมใช้งาน, ต้องสร้างผ่านฟังก์ชัน New... เท่านั้น
 type SkipList[K any, V any] struct {
-	header           *node[K, V]         // โหนดเริ่มต้น (sentinel node)
-	level            int                 // ชั้นสูงสุดที่มีอยู่ในปัจจุบัน
-	length           int                 // จำนวนรายการทั้งหมดใน skiplist
-	rand             *rand.Rand          // ตัวสร้างเลขสุ่มสำหรับกำหนดชั้น
-	mutex            sync.RWMutex        // Mutex สำหรับการทำงานแบบ concurrent-safe
-	updateCacheRanks []int               // แคชสำหรับ rank ที่ใช้ใน Insert
-	updateCache      []INode[K, V]       // แคชสำหรับ update path
-	allocator        nodeAllocator[K, V] // Abstraction สำหรับการจัดสรรหน่วยความจำ
-	arenaInitialSize int                 // ขนาดเริ่มต้นของ Arena (ถ้าใช้)
-	arenaGrowthFactor float64            // สัดส่วนการขยาย Arena (ถ้าใช้)
-	arenaGrowthBytes int                 // ขนาด byte คงที่ในการขยาย Arena (ถ้าใช้)
-	arenaGrowthThreshold float64        // Threshold สำหรับการขยาย Arena ล่วงหน้า (ถ้าใช้)
-	compare          Comparator[K]       // ฟังก์ชันสำหรับเปรียบเทียบ key
+	header               *node[K, V]         // โหนดเริ่มต้น (sentinel node)
+	level                int                 // ชั้นสูงสุดที่มีอยู่ในปัจจุบัน
+	length               int                 // จำนวนรายการทั้งหมดใน skiplist
+	rand                 *rand.Rand          // ตัวสร้างเลขสุ่มสำหรับกำหนดชั้น
+	mutex                sync.RWMutex        // Mutex สำหรับการทำงานแบบ concurrent-safe
+	updateCacheRanks     []int               // แคชสำหรับ rank ที่ใช้ใน Insert
+	updateCache          []INode[K, V]       // แคชสำหรับ update path
+	allocator            nodeAllocator[K, V] // Abstraction สำหรับการจัดสรรหน่วยความจำ
+	arenaInitialSize     int                 // ขนาดเริ่มต้นของ Arena (ถ้าใช้)
+	arenaGrowthFactor    float64             // สัดส่วนการขยาย Arena (ถ้าใช้)
+	arenaGrowthBytes     int                 // ขนาด byte คงที่ในการขยาย Arena (ถ้าใช้)
+	arenaGrowthThreshold float64             // Threshold สำหรับการขยาย Arena ล่วงหน้า (ถ้าใช้)
+	compare              Comparator[K]       // ฟังก์ชันสำหรับเปรียบเทียบ key
 }
 
 // Option is a function that configures a SkipList.
@@ -660,7 +660,7 @@ func (sl *SkipList[K, V]) Successor(key K) (INode[K, V], bool) {
 func (sl *SkipList[K, V]) Seek(key K) (INode[K, V], bool) {
 	sl.mutex.RLock()
 	defer sl.mutex.RUnlock()
-	
+
 	node := sl.findGreaterOrEqual(key)
 
 	if node != nil {

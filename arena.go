@@ -14,11 +14,11 @@ type arenaChunk struct {
 // The Arena itself is NOT thread-safe; synchronization must be handled by the caller.
 // ตัว Arena เองไม่ thread-safe; ผู้เรียกต้องจัดการ synchronization เอง
 type Arena struct {
-	root         *arenaChunk // The first chunk in the linked list.
-	current      *arenaChunk // The chunk we are currently allocating from.
-	growthFactor float64     // Factor to grow by (e.g., 2.0 for 100% growth).
-	growthBytes  int         // Bytes to grow by (fixed).
-	growthThreshold float64    // Proactive growth threshold (0.0 to 1.0).
+	root            *arenaChunk // The first chunk in the linked list.
+	current         *arenaChunk // The chunk we are currently allocating from.
+	growthFactor    float64     // Factor to grow by (e.g., 2.0 for 100% growth).
+	growthBytes     int         // Bytes to grow by (fixed).
+	growthThreshold float64     // Proactive growth threshold (0.0 to 1.0).
 }
 
 // ArenaOption configures an Arena.

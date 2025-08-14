@@ -75,7 +75,7 @@ func createSkipList(numItems int, allocatorType string) *skiplist.SkipList[int, 
 		// ประเมินขนาดของ Arena: ประมาณ 400 bytes ต่อโหนด
 		arenaSize := numItems * 400
 		fmt.Printf("Using Arena allocator with size %d MB\n", arenaSize/(1024*1024))
-		return skiplist.New(skiplist.WithArena[int,int](arenaSize))
+		return skiplist.New(skiplist.WithArena[int, int](arenaSize))
 	}
 
 	fmt.Println("Using Pool allocator (default)")
