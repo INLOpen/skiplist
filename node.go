@@ -106,9 +106,11 @@ func (a *arenaAllocator[K, V]) Get() *node[K, V] {
 	if ptr == nil {
 		panic("skiplist (arena): out of memory")
 	}
-	// The memory from the arena is not zeroed, so we get a pointer to it
-	// and must initialize it properly. The `forward` slice will be nil.
-	return (*node[K, V])(ptr)
+	// The memory from the arena may contain previous data. Zero the node
+	// struct so its slice headers and pointers are valid zero values.
+	n := (*node[K, V])(ptr)
+	*n = node[K, V]{}
+	return n
 }
 
 // Put does nothing for an arena allocator, as memory is reclaimed all at once on Reset.
