@@ -88,41 +88,82 @@ func (p *poolAllocator[K, V]) Reset() {
 
 // arenaAllocator implements nodeAllocator using a memory arena.
 type arenaAllocator[K any, V any] struct {
-	arena *Arena
+	// chunks holds slices of nodes. Each chunk is a Go-managed slice of
+	// concrete `node` values so that the Go GC is aware of pointer fields
+	// inside nodes. This avoids storing Go pointers in raw byte buffers
+	// (which the GC would not scan) and prevents subtle memory corruption
+	// during long-running benchmarks and GC cycles.
+	chunks [][]node[K, V]
+	// current index within the last chunk
+	pos int
+	// next growth size (number of nodes to allocate for the next chunk)
+	nextChunkSize int
 }
 
-func newArenaAllocator[K any, V any](initialSize int, opts ...ArenaOption) *arenaAllocator[K, V] {
-	return &arenaAllocator[K, V]{
-		arena: NewArena(initialSize, opts...),
+func newArenaAllocator[K any, V any](initialSize int, _opts ...ArenaOption) *arenaAllocator[K, V] {
+	// Determine how many nodes the initialSize (in bytes) can hold.
+	nodeSize := int(unsafe.Sizeof(node[K, V]{}))
+	if nodeSize <= 0 {
+		nodeSize = 1
 	}
+	count := initialSize / nodeSize
+	if count < 1 {
+		count = 1
+	}
+
+	a := &arenaAllocator[K, V]{
+		chunks:        make([][]node[K, V], 0, 4),
+		pos:           0,
+		nextChunkSize: count,
+	}
+	a.grow() // allocate first chunk
+	return a
 }
 
-// Get allocates a new node from the arena.
-// It panics if the arena is out of memory.
+// grow allocates a new chunk of nodes and appends it to chunks.
+func (a *arenaAllocator[K, V]) grow() {
+	size := a.nextChunkSize
+	if size < 1 {
+		size = 1
+	}
+	chunk := make([]node[K, V], size)
+	a.chunks = append(a.chunks, chunk)
+	a.pos = 0
+	// By default, double the next chunk size for exponential growth.
+	a.nextChunkSize = size * 2
+}
+
 func (a *arenaAllocator[K, V]) Get() *node[K, V] {
-	nodeSize := unsafe.Sizeof(node[K, V]{})
-	nodeAlign := unsafe.Alignof(node[K, V]{})
-	ptr := a.arena.Alloc(nodeSize, nodeAlign)
-	if ptr == nil {
-		panic("skiplist (arena): out of memory")
+	// Ensure we have at least one chunk.
+	if len(a.chunks) == 0 {
+		a.grow()
 	}
-	// The arena returns raw memory that may contain previous allocations' bytes.
-	// That means slice headers and pointer fields inside the node struct
-	// could be non-zero (and point to unrelated memory). We explicitly
-	// zero the node value here to ensure all headers/pointers are valid
-	// Go zero-values before the node is used by the skiplist. This avoids
-	// subtle panics when iterator/traversal code reads slice headers.
-	n := (*node[K, V])(ptr)
+	// If current chunk is exhausted, grow.
+	if a.pos >= len(a.chunks[len(a.chunks)-1]) {
+		a.grow()
+	}
+	// Return pointer to next node in the current chunk.
+	last := &a.chunks[len(a.chunks)-1]
+	n := &(*last)[a.pos]
+	// Zero the node to ensure a valid Go zero-value (clears slice headers/pointers).
 	*n = node[K, V]{}
+	a.pos++
 	return n
 }
 
-// Put does nothing for an arena allocator, as memory is reclaimed all at once on Reset.
 func (a *arenaAllocator[K, V]) Put(n *node[K, V]) {
-	// No-op. The node memory will be reused when the entire arena is reset.
+	// No-op. Memory will be reclaimed on Reset().
 }
 
-// Reset reclaims all memory in the arena, making it available for new allocations.
 func (a *arenaAllocator[K, V]) Reset() {
-	a.arena.Reset()
+	// Keep the first chunk but discard others to allow GC of extra memory.
+	if len(a.chunks) == 0 {
+		return
+	}
+	first := a.chunks[0]
+	a.chunks = a.chunks[:1]
+	a.chunks[0] = first
+	a.pos = 0
+	// reset growth back to initial chunk size (length of first chunk)
+	a.nextChunkSize = len(first)
 }
