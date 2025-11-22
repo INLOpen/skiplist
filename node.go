@@ -106,8 +106,12 @@ func (a *arenaAllocator[K, V]) Get() *node[K, V] {
 	if ptr == nil {
 		panic("skiplist (arena): out of memory")
 	}
-	// The memory from the arena may contain previous data. Zero the node
-	// struct so its slice headers and pointers are valid zero values.
+	// The arena returns raw memory that may contain previous allocations' bytes.
+	// That means slice headers and pointer fields inside the node struct
+	// could be non-zero (and point to unrelated memory). We explicitly
+	// zero the node value here to ensure all headers/pointers are valid
+	// Go zero-values before the node is used by the skiplist. This avoids
+	// subtle panics when iterator/traversal code reads slice headers.
 	n := (*node[K, V])(ptr)
 	*n = node[K, V]{}
 	return n
