@@ -23,6 +23,9 @@ import (
 // `node.go` (the `arenaAllocator` there allocates `[]node` chunks).
 // Prefer that approach when allocating Go structs that carry pointers.
 //
+// See `README.md` → section "Arena Safety Note" for more details and
+// rationale.
+//
 // If you need a raw byte arena for non-pointer data, this implementation
 // can still be used; otherwise prefer typed chunk allocators or other
 // approaches that keep pointer-containing values in Go-managed slices.
