@@ -431,6 +431,15 @@ func (sl *SkipList[K, V]) Clear() {
 		sl.header.forward[i] = nil
 	}
 
+	// Also clear span entries and the header backward pointer to ensure
+	// the header is in a clean zero state. This makes the invariants
+	// explicit and prevents stale span/backward data from lingering
+	// after a Clear().
+	for i := range sl.header.span {
+		sl.header.span[i] = 0
+	}
+	sl.header.backward = nil
+
 	// Reset the allocator.
 	// For Arena, this reclaims all memory.
 	// For Pool, we replace it to allow the old one to be GC'd.

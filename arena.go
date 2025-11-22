@@ -4,6 +4,32 @@ import (
 	"unsafe"
 )
 
+// NOTE (DEPRECATION / SAFETY):
+// The raw byte-buffer based `Arena` implemented in this file provides
+// fast, contiguous allocation of untyped bytes. It is suitable for
+// storing plain data that does not contain Go-managed pointers (for
+// example, C-compatible POD data or raw byte payloads). However, it is
+// UNSAFE to use this `Arena` to allocate Go structs that contain
+// pointer-like fields (pointers, slices, maps, interfaces, etc.).
+//
+// Reason: the Go garbage collector only scans memory that it knows
+// contains Go pointers. Storing pointer-containing Go values inside a
+// raw `[]byte` buffer hides those pointers from the GC. This can lead
+// to pointers not being tracked correctly, causing memory corruption,
+// use-after-free-like behaviour, or crashes under heavy GC / concurrency.
+//
+// In this repository we replaced earlier usage of a byte-backed Arena
+// for `node` allocations with a typed, GC-safe chunk allocator in
+// `node.go` (the `arenaAllocator` there allocates `[]node` chunks).
+// Prefer that approach when allocating Go structs that carry pointers.
+//
+// See `README.md` → section "Arena Safety Note" for more details and
+// rationale.
+//
+// If you need a raw byte arena for non-pointer data, this implementation
+// can still be used; otherwise prefer typed chunk allocators or other
+// approaches that keep pointer-containing values in Go-managed slices.
+
 // arenaChunk represents one contiguous block of memory. Arenas are composed of a linked list of chunks.
 type arenaChunk struct {
 	buf    []byte

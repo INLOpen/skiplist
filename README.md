@@ -330,3 +330,17 @@ Contributions are welcome! Please feel free to submit a pull request or open an 
 ## License
 
 This project is licensed under the MIT License - see the LICENSE.md file for details.
+
+## Arena Safety Note
+
+Important: the raw byte-buffer `Arena` implementation in `arena.go` is
+unsafe for allocating Go structs that contain pointers (slices, maps,
+interfaces, etc.). The Go garbage collector does not scan arbitrary
+`[]byte` buffers for pointers, so storing pointer-containing Go values in
+an untyped byte arena can lead to GC misbehavior, memory corruption, or
+crashes under heavy GC/concurrency.
+
+Recommendation: for allocating Go structs that include pointers, prefer
+the typed, GC-safe allocator used elsewhere in this project (see
+`arenaAllocator` in `node.go`, which allocates `[]node` chunks). Use the
+raw `Arena` only for non-pointer, raw byte payloads.
