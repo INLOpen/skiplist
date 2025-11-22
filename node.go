@@ -98,6 +98,13 @@ type arenaAllocator[K any, V any] struct {
 	pos int
 	// next growth size (number of nodes to allocate for the next chunk)
 	nextChunkSize int
+	// nodeSize is the sizeof(node[K,V]) in bytes; used when interpreting
+	// growth bytes options.
+	nodeSize int
+	// growth strategy derived from ArenaOption args
+	growthFactor    float64
+	growthBytes     int
+	growthThreshold float64
 }
 
 func newArenaAllocator[K any, V any](initialSize int, _opts ...ArenaOption) *arenaAllocator[K, V] {
@@ -110,11 +117,24 @@ func newArenaAllocator[K any, V any](initialSize int, _opts ...ArenaOption) *are
 	if count < 1 {
 		count = 1
 	}
+	// Apply provided ArenaOption funcs on a temporary Arena to extract
+	// growth parameters (growthFactor, growthBytes, growthThreshold).
+	var tmp Arena
+	for _, opt := range _opts {
+		if opt == nil {
+			continue
+		}
+		opt(&tmp)
+	}
 
 	a := &arenaAllocator[K, V]{
-		chunks:        make([][]node[K, V], 0, 4),
-		pos:           0,
-		nextChunkSize: count,
+		chunks:          make([][]node[K, V], 0, 4),
+		pos:             0,
+		nextChunkSize:   count,
+		nodeSize:        nodeSize,
+		growthFactor:    tmp.growthFactor,
+		growthBytes:     tmp.growthBytes,
+		growthThreshold: tmp.growthThreshold,
 	}
 	a.grow() // allocate first chunk
 	return a
@@ -122,15 +142,38 @@ func newArenaAllocator[K any, V any](initialSize int, _opts ...ArenaOption) *are
 
 // grow allocates a new chunk of nodes and appends it to chunks.
 func (a *arenaAllocator[K, V]) grow() {
-	size := a.nextChunkSize
+	var size int
+	if len(a.chunks) == 0 {
+		size = a.nextChunkSize
+	} else {
+		lastSize := len(a.chunks[len(a.chunks)-1])
+		if a.growthBytes > 0 {
+			// Interpret growthBytes as number of bytes to add; convert to node count
+			calc := a.growthBytes / a.nodeSize
+			if calc < 1 {
+				calc = 1
+			}
+			size = calc
+		} else if a.growthFactor > 1.0 {
+			size = int(float64(lastSize) * a.growthFactor)
+			if size < 1 {
+				size = 1
+			}
+		} else {
+			// Default: double the previous chunk size
+			size = lastSize * 2
+		}
+	}
+
 	if size < 1 {
 		size = 1
 	}
+
 	chunk := make([]node[K, V], size)
 	a.chunks = append(a.chunks, chunk)
 	a.pos = 0
-	// By default, double the next chunk size for exponential growth.
-	a.nextChunkSize = size * 2
+	// Prepare nextChunkSize as current size (used if no previous chunks exist)
+	a.nextChunkSize = size
 }
 
 func (a *arenaAllocator[K, V]) Get() *node[K, V] {
