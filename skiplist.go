@@ -574,6 +574,29 @@ func (sl *SkipList[K, V]) RangeQuery(start, end K, f func(key K, value V) bool) 
 	}
 }
 
+// Range returns an iterator that iterates over items where the key is between
+// start and end (inclusive). The returned iterator holds the skiplist's read
+// lock for its lifetime — call `it.Close()` when finished to release the lock.
+// The iterator is 'unsafe' (it does not perform per-method locking) because the
+// read lock is already held for the duration of its use.
+func (sl *SkipList[K, V]) RangeIterator(start, end K) *Iterator[K, V] {
+	sl.mutex.RLock()
+	it := sl.NewIterator(withUnsafe[K, V](), WithEnd[K, V](end))
+	// Mark that iterator holds the lock so Close() can release it.
+	it.lockHeld = true
+	// Position the iterator *before* the first matching element so that Next()
+	// yields the first element >= start. Use the iterator's internal search
+	// (caller already holds the read lock).
+	found := it.findGreaterOrEqual(start)
+	if found == nil {
+		it.current = nil
+	} else {
+		// Position before the found node so Next() returns found
+		it.current = found.backward
+	}
+	return it
+}
+
 // Predecessor ค้นหา key-value คู่ของโหนดที่อยู่ก่อนหน้า (predecessor) ของ key ที่กำหนด
 // Predecessor finds the key-value pair of the node that precedes the given key.
 // The predecessor is the node with the largest key that is smaller than the target key.

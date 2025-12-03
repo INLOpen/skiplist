@@ -24,6 +24,11 @@ type Iterator[K any, V any] struct {
 	current INode[K, V]     // โหนดปัจจุบันที่ Iterator ชี้อยู่
 	reverse bool
 	unsafe  bool // ถ้าเป็น true, จะไม่ทำการ lock/unlock (ใช้สำหรับ RangeWithIterator)
+	// Optional inclusive end bound for iteration. If set, Next() stops before any key > end.
+	end    K
+	hasEnd bool
+	// If true, the iterator holds sl.mutex.RLock() and Close() must be called to release it.
+	lockHeld bool
 }
 
 // IteratorOption configures an Iterator.
@@ -36,6 +41,14 @@ type IteratorOption[K any, V any] func(*Iterator[K, V])
 func withUnsafe[K any, V any]() IteratorOption[K, V] {
 	return func(it *Iterator[K, V]) {
 		it.unsafe = true
+	}
+}
+
+// WithEnd sets an inclusive upper bound for iteration. Iteration will stop before any element with key > end.
+func WithEnd[K any, V any](end K) IteratorOption[K, V] {
+	return func(it *Iterator[K, V]) {
+		it.end = end
+		it.hasEnd = true
 	}
 }
 
@@ -128,6 +141,13 @@ func (it *Iterator[K, V]) Next() bool {
 	if nextNode == nil {
 		it.current = nil // Mark as exhausted by setting to a true nil interface.
 		return false
+	}
+	// If an end bound is set, stop before visiting any element > end.
+	if it.hasEnd {
+		if it.sl.compare(nextNode.key, it.end) > 0 {
+			it.current = nil
+			return false
+		}
 	}
 	it.current = nextNode
 	return true
@@ -290,6 +310,17 @@ func (it *Iterator[K, V]) Last() bool {
 	return it.lastInternal()
 }
 
+// Close releases any lock held by the iterator. It is a no-op for iterators
+// that do not hold the read lock. Call Close() when you are finished iterating
+// if the iterator was obtained from `SkipList.RangeIterator(start,end)` which holds
+// the read lock for the iterator's lifetime.
+func (it *Iterator[K, V]) Close() {
+	if it.lockHeld {
+		it.lockHeld = false
+		it.sl.mutex.RUnlock()
+	}
+}
+
 // SeekToFirst positions the iterator just before the first element.
 // For a forward iterator, this is before the smallest key.
 // For a reverse iterator, this is before the largest key.
@@ -365,21 +396,31 @@ func (it *Iterator[K, V]) Seek(key K) bool {
 		defer it.sl.mutex.RUnlock()
 	}
 
-	// ใช้ตรรกะเดียวกับ SkipList.Seek เพื่อหาโหนดเป้าหมาย (ceiling node)
+	// Reuse SkipList's findGreaterOrEqual for the correct ceiling node logic.
+	found := it.findGreaterOrEqual(key)
+
+	// If an end bound is set and the found node is beyond the end, treat as not found.
+	if found != nil && it.hasEnd {
+		if it.sl.compare(found.key, it.end) > 0 {
+			it.current = nil
+			return false
+		}
+	}
+
+	// Position the iterator at the found node (so Key()/Value() return it).
+	it.current = found
+	return found != nil
+}
+
+func (it *Iterator[K, V]) findGreaterOrEqual(key K) *node[K, V] {
 	current := it.sl.header
-	// ค้นหาโหนดที่อยู่ก่อนหน้าตำแหน่งเป้าหมาย
 	for i := it.sl.level; i >= 0; i-- {
 		for current.forward[i] != nil && it.sl.compare(current.forward[i].key, key) < 0 {
 			current = current.forward[i]
 		}
 	}
-	// โหนดถัดไปคือโหนดแรกที่มี key >= key ซึ่งเป็นเป้าหมายของเรา
-	foundNode := current.forward[0]
-	it.current = foundNode
-
-	// การ seek จะสำเร็จถ้าเราหาโหนดเจอ (it.current ไม่ใช่ nil)
-	// ต้องตรวจสอบจาก concrete pointer (foundNode) ไม่ใช่จาก interface (it.current)
-	return foundNode != nil
+	// The next node is the first one with a key >= key.
+	return current.forward[0]
 }
 
 // Clone creates an independent copy of the iterator at its current position.

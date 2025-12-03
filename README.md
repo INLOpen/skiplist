@@ -276,6 +276,43 @@ func main() {
 }
 ```
 
+### RangeIterator (lock-holding iterator)
+
+`RangeIterator(start, end)` returns an iterator that holds a read-lock
+on the skiplist for the lifetime of the iterator. This makes iteration
+very efficient because the list does not need to acquire/release the
+lock on each step. The caller is responsible for releasing the lock by
+calling `it.Close()` when finished — using `defer it.Close()` is
+recommended.
+
+```go
+package main
+
+import (
+	"fmt"
+	"github.com/INLOpen/skiplist"
+)
+
+func main() {
+	sl := skiplist.New[int, string]()
+	sl.Insert(10, "A")
+	sl.Insert(20, "B")
+	sl.Insert(30, "C")
+	sl.Insert(40, "D")
+
+	// Iterate keys in the inclusive range [15, 35].
+	it := sl.RangeIterator(15, 35)
+	defer it.Close()
+
+	for it.Next() {
+		fmt.Printf("  %d: %s\n", it.Key(), it.Value())
+	}
+	// Output:
+	//   20: B
+	//   30: C
+}
+```
+
 ## API Reference
 
 ### Constructors
