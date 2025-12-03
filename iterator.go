@@ -47,8 +47,17 @@ func withUnsafe[K any, V any]() IteratorOption[K, V] {
 	}
 }
 
-// WithEnd sets an inclusive upper bound for iteration. Iteration will include all elements.
+// WithEnd sets an inclusive upper bound for iteration. Iteration will include all elements
 // with key <= end and will stop when encountering the first element with key > end.
+//
+// Note on Seek behavior with end bounds: When using Seek(key) on an iterator with an
+// end bound, the iterator uses ceiling semantics (finds the first key >= target).
+// If the found key exceeds the end bound, the iterator is exhausted (returns false).
+//
+// Example with elements [10, 20, 30, 40] and end=25:
+//   - Seek(15) finds 20, which is <= 25, returns true (iterator at 20)
+//   - Seek(22) finds 30, which is > 25, returns false (iterator exhausted)
+//   - Seek(30) finds 30, which is > 25, returns false (iterator exhausted)
 func WithEnd[K any, V any](end K) IteratorOption[K, V] {
 	return func(it *Iterator[K, V]) {
 		it.end = end
@@ -428,10 +437,15 @@ func (it *Iterator[K, V]) SeekToLast() bool {
 	return true
 }
 
-// Seek moves the iterator to the first element with a key greater than or equal to the given key.
-// This behavior is consistent regardless of the iterator's direction (normal or reverse).
-// It returns true if such an element is found, otherwise it returns false and the iterator is positioned at the end.
+// Seek moves the iterator to the first element with a key greater than or equal to the given key
+// (ceiling semantics). This behavior is consistent regardless of the iterator's direction.
+// It returns true if such an element is found, otherwise it returns false and the iterator is exhausted.
 // After a successful seek, Key() and Value() will return the data of the found element.
+//
+// When an end bound is set (via WithEnd), the found element must also satisfy key <= end.
+// If the ceiling element exceeds the end bound, the iterator is exhausted and false is returned.
+// See WithEnd documentation for detailed examples.
+//
 // Seek เลื่อน Iterator ไปยังรายการแรกที่มี key เท่ากับหรือมากกว่า key ที่กำหนด
 // พฤติกรรมนี้จะเหมือนกันเสมอ ไม่ว่า iterator จะเป็นแบบปกติหรือแบบย้อนกลับ (reverse)
 // คืนค่า true หากพบรายการดังกล่าว, มิฉะนั้นคืนค่า false และ Iterator จะชี้ไปที่ท้ายสุด
