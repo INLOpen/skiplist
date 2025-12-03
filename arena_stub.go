@@ -47,9 +47,9 @@ func WithGrowthThreshold(threshold float64) ArenaOption {
 // NewArena creates a minimal Arena instance. The real allocation behavior is
 // intentionally omitted; this is a shim to provide the configuration API
 // used elsewhere in the codebase.
-func NewArena(initialSize int, _opts ...ArenaOption) *Arena {
+func NewArena(initialSize int, opts ...ArenaOption) *Arena {
 	a := &Arena{}
-	for _, opt := range _opts {
+	for _, opt := range opts {
 		if opt != nil {
 			opt(a)
 		}

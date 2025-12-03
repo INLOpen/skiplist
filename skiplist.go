@@ -8,6 +8,7 @@ import (
 	"cmp" // Re-add cmp for default comparator
 	"math/rand/v2"
 	"sync"
+	"sync/atomic"
 )
 
 const (
@@ -574,16 +575,30 @@ func (sl *SkipList[K, V]) RangeQuery(start, end K, f func(key K, value V) bool) 
 	}
 }
 
-// Range returns an iterator that iterates over items where the key is between
+// RangeIterator returns an iterator that iterates over items where the key is between
 // start and end (inclusive). The returned iterator holds the skiplist's read
-// lock for its lifetime — call `it.Close()` when finished to release the lock.
+// lock for its lifetime — you MUST call `it.Close()` when finished to release the lock.
+// Failing to call Close() will cause a resource leak and may lead to deadlocks.
+// It is recommended to use `defer it.Close()` immediately after obtaining the iterator.
 // The iterator is 'unsafe' (it does not perform per-method locking) because the
 // read lock is already held for the duration of its use.
+//
+// Example usage:
+//
+//	it := sl.RangeIterator(start, end)
+//	defer it.Close()
+//	for it.Next() {
+//	    key, value := it.Key(), it.Value()
+//	    // process key, value
+//	}
 func (sl *SkipList[K, V]) RangeIterator(start, end K) *Iterator[K, V] {
 	sl.mutex.RLock()
 	it := sl.NewIterator(withUnsafe[K, V](), WithEnd[K, V](end))
 	// Mark that iterator holds the lock so Close() can release it.
-	it.lockHeld = true
+	// Mark that iterator holds the lock so Close() can release it.
+	// Use atomic store to update the flag in a race-safe manner if Close()
+	// might be called concurrently.
+	atomic.StoreUint32(&it.lockHeld, 1)
 	// Position the iterator *before* the first matching element so that Next()
 	// yields the first element >= start. Use the iterator's internal search
 	// (caller already holds the read lock).

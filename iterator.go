@@ -1,5 +1,7 @@
 package skiplist
 
+import "sync/atomic"
+
 // Iterator provides a way to iterate over the elements of a SkipList.
 // The typical use is:
 //
@@ -27,8 +29,9 @@ type Iterator[K any, V any] struct {
 	// Optional inclusive end bound for iteration. If set, Next() stops before any key > end.
 	end    K
 	hasEnd bool
-	// If true, the iterator holds sl.mutex.RLock() and Close() must be called to release it.
-	lockHeld bool
+	// If non-zero, the iterator holds sl.mutex.RLock() and Close() must be called to release it.
+	// Use an atomic uint32 to make Close() safe against concurrent Close() calls.
+	lockHeld uint32
 }
 
 // IteratorOption configures an Iterator.
@@ -44,7 +47,8 @@ func withUnsafe[K any, V any]() IteratorOption[K, V] {
 	}
 }
 
-// WithEnd sets an inclusive upper bound for iteration. Iteration will stop before any element with key > end.
+// WithEnd sets an inclusive upper bound for iteration. Iteration will include all elements.
+// with key <= end and will stop when encountering the first element with key > end.
 func WithEnd[K any, V any](end K) IteratorOption[K, V] {
 	return func(it *Iterator[K, V]) {
 		it.end = end
@@ -104,7 +108,28 @@ func (it *Iterator[K, V]) Next() bool {
 		// If current is nil, it's the start of reverse iteration.
 		// Position at the last element by calling the unlocked Last().
 		if it.current == nil {
-			return it.lastInternal()
+			if !it.lastInternal() {
+				return false
+			}
+			// If an end bound is set, skip any trailing elements > end.
+			if it.hasEnd {
+				for {
+					cur, _ := it.current.(*node[K, V])
+					if cur == nil || cur == it.sl.header {
+						it.current = nil
+						return false
+					}
+					if it.sl.compare(cur.key, it.end) <= 0 {
+						break
+					}
+					it.current = cur.backward
+					if it.current == it.sl.header {
+						it.current = nil
+						return false
+					}
+				}
+			}
+			return true
 		}
 
 		// Otherwise, it's a standard "prev" move.
@@ -120,6 +145,25 @@ func (it *Iterator[K, V]) Next() bool {
 		if it.current == it.sl.header {
 			it.current = nil // Mark as exhausted
 			return false
+		}
+
+		// If an end bound is set, skip backward over any nodes > end.
+		if it.hasEnd {
+			for {
+				cur, _ := it.current.(*node[K, V])
+				if cur == nil || cur == it.sl.header {
+					it.current = nil
+					return false
+				}
+				if it.sl.compare(cur.key, it.end) <= 0 {
+					break
+				}
+				it.current = cur.backward
+				if it.current == it.sl.header {
+					it.current = nil
+					return false
+				}
+			}
 		}
 		return true
 	}
@@ -315,8 +359,10 @@ func (it *Iterator[K, V]) Last() bool {
 // if the iterator was obtained from `SkipList.RangeIterator(start,end)` which holds
 // the read lock for the iterator's lifetime.
 func (it *Iterator[K, V]) Close() {
-	if it.lockHeld {
-		it.lockHeld = false
+	// Atomically clear the flag; only the goroutine that observes a 1
+	// needs to call RUnlock(). This prevents double-unlock when Close()
+	// is called concurrently from multiple goroutines.
+	if atomic.SwapUint32(&it.lockHeld, 0) == 1 {
 		it.sl.mutex.RUnlock()
 	}
 }

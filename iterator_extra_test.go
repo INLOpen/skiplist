@@ -147,3 +147,54 @@ func TestIterator_PrevWithReverse(t *testing.T) {
 		})
 	}
 }
+
+// Tests for reverse iteration combined with WithEnd bound semantics.
+func TestIterator_ReverseWithEnd(t *testing.T) {
+	for _, setup := range getTestSetups[int, int]() {
+		t.Run(setup.name, func(t *testing.T) {
+			sl := setup.constructor(nil)
+			// populate
+			sl.Insert(10, 10)
+			sl.Insert(20, 20)
+			sl.Insert(30, 30)
+			sl.Insert(40, 40)
+			sl.Insert(50, 50)
+
+			t.Run("end trims tail", func(t *testing.T) {
+				// WithEnd 35 should skip 50 and 40 and start at 30
+				it := sl.NewIterator(WithReverse[int, int](), WithEnd[int, int](35))
+				defer it.Close()
+
+				var got []int
+				for it.Next() {
+					got = append(got, it.Key())
+				}
+				want := []int{30, 20, 10}
+				if !reflect.DeepEqual(got, want) {
+					t.Fatalf("ReverseWithEnd(trim): got %v want %v", got, want)
+				}
+			})
+
+			t.Run("end larger than max returns all", func(t *testing.T) {
+				it := sl.NewIterator(WithReverse[int, int](), WithEnd[int, int](100))
+				defer it.Close()
+				var got []int
+				for it.Next() {
+					got = append(got, it.Key())
+				}
+				want := []int{50, 40, 30, 20, 10}
+				if !reflect.DeepEqual(got, want) {
+					t.Fatalf("ReverseWithEnd(all): got %v want %v", got, want)
+				}
+			})
+
+			t.Run("end smaller than min returns none", func(t *testing.T) {
+				it := sl.NewIterator(WithReverse[int, int](), WithEnd[int, int](5))
+				defer it.Close()
+				if it.Next() {
+					t.Fatalf("ReverseWithEnd(none): expected no elements but got first=%v", it.Key())
+				}
+			})
+		})
+	}
+}
