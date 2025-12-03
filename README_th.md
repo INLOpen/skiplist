@@ -208,6 +208,41 @@ func main() {
 }
 ```
 
+### RangeIterator (iterator ที่ถือ lock)
+
+`RangeIterator(start, end)` จะคืนค่า iterator ที่ถือ read-lock
+ของ skiplist ตลอดอายุของ iterator ทำให้การวนลูปมีประสิทธิภาพ
+สูงเพราะไม่ต้องล็อก/ปลดล็อกซ้ำๆ ผู้เรียกต้องปลดล็อกด้วยการเรียก
+`it.Close()` เมื่อใช้งานเสร็จ — แนะนำให้ใช้ `defer it.Close()`.
+
+```go
+package main
+
+import (
+	"fmt"
+	"github.com/INLOpen/skiplist"
+)
+
+func main() {
+	sl := skiplist.New[int, string]()
+	sl.Insert(10, "A")
+	sl.Insert(20, "B")
+	sl.Insert(30, "C")
+	sl.Insert(40, "D")
+
+	// วนลูประหว่างคีย์ [15, 35] (รวมทั้งสองขอบ)
+	it := sl.RangeIterator(15, 35)
+	defer it.Close()
+
+	for it.Next() {
+		fmt.Printf("  %d: %s\n", it.Key(), it.Value())
+	}
+	// Output:
+	//   20: B
+	//   30: C
+}
+```
+
 ## API Reference
 
 ### Constructors

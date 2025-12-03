@@ -41,6 +41,30 @@ func getTestSetups[K cmp.Ordered, V any]() []testSetup[K, V] {
 	}
 }
 
+type testCustomSetup[K any, V any] struct {
+	name        string
+	constructor func(compare Comparator[K], opts ...Option[K, V]) *SkipList[K, V]
+}
+
+func getTestCustomKeySetups[K any, V any]() []testCustomSetup[K, V] {
+	return []testCustomSetup[K, V]{
+		{
+			name: "WithPool",
+			constructor: func(compare Comparator[K], opts ...Option[K, V]) *SkipList[K, V] {
+				return NewWithComparator(compare, opts...)
+			},
+		},
+		{
+			name: "WithArena",
+			constructor: func(compare Comparator[K], opts ...Option[K, V]) *SkipList[K, V] {
+				arenaSize := 1024 * 1024 // 1MB Arena for tests
+				allOpts := append([]Option[K, V]{WithArena[K, V](arenaSize)}, opts...)
+				return NewWithComparator(compare, allOpts...)
+			},
+		},
+	}
+}
+
 func TestSkipList(t *testing.T) {
 	for _, setup := range getTestSetups[int, string]() {
 		t.Run(setup.name, func(t *testing.T) {
@@ -361,6 +385,91 @@ func TestSkipList_RangeQuery(t *testing.T) {
 					t.Fatalf("Expected 0 keys for invalid range, got %d", len(keys))
 				}
 			})
+		})
+	}
+}
+
+// Tests for the iterator-returning helpers that hold a read lock.
+func TestFindGreaterOrEqualIteratorAndRangeIterator(t *testing.T) {
+	for _, setup := range getTestSetups[int, int]() {
+		t.Run(setup.name, func(t *testing.T) {
+			maxInt := int(^uint(0) >> 1)
+			// FindGreaterOrEqualIterator tests
+			sl := setup.constructor(nil)
+
+			// empty list: Seek should find no element
+			if node, ok := sl.Seek(10); ok || node != nil {
+				t.Fatalf("FindGreaterOrEqualIterator on empty list should not yield elements")
+			}
+
+			// populate
+			sl.Insert(10, 10)
+			sl.Insert(20, 20)
+			sl.Insert(30, 30)
+
+			var it *Iterator[int, int]
+
+			// start before first -> first
+			it = sl.RangeIterator(5, maxInt)
+			if !it.Next() || it.Key() != 10 {
+				it.Close()
+				t.Fatalf("expected first key 10, got %+v", it.current)
+			}
+			it.Close()
+
+			// exact match
+			it = sl.RangeIterator(20, maxInt)
+			if !it.Next() || it.Key() != 20 {
+				it.Close()
+				t.Fatalf("expected key 20, got %+v", it.current)
+			}
+			it.Close()
+
+			// between keys -> next higher
+			it = sl.RangeIterator(25, maxInt)
+			if !it.Next() || it.Key() != 30 {
+				it.Close()
+				t.Fatalf("expected key 30, got %+v", it.current)
+			}
+			it.Close()
+
+			// past last -> no elements (verify with SkipList.Seek)
+			if node, ok := sl.Seek(40); ok || node != nil {
+				t.Fatalf("expected no elements for key past last")
+			}
+
+			// RangeIterator tests
+			sl2 := setup.constructor(nil)
+			sl2.Insert(10, 10)
+			sl2.Insert(20, 20)
+			sl2.Insert(30, 30)
+			sl2.Insert(40, 40)
+			sl2.Insert(50, 50)
+
+			// inclusive middle range 15..45 -> 20,30,40
+			rit := sl2.RangeIterator(15, 45)
+			var got []int
+			for rit.Next() {
+				got = append(got, rit.Key())
+			}
+			rit.Close()
+			want := []int{20, 30, 40}
+			if len(got) != len(want) {
+				t.Fatalf("RangeIterator returned %v, want %v", got, want)
+			}
+			for i := range want {
+				if got[i] != want[i] {
+					t.Fatalf("RangeIterator mismatch at %d: got %v want %v", i, got, want)
+				}
+			}
+
+			// empty range (start > end)
+			rit = sl2.RangeIterator(45, 25)
+			if rit.Next() {
+				rit.Close()
+				t.Fatalf("RangeIterator with start>end should yield no elements")
+			}
+			rit.Close()
 		})
 	}
 }
@@ -1317,6 +1426,92 @@ func TestSkipList_Rank(t *testing.T) {
 					t.Errorf("Rank(50) after PopMax should be 2, got %d", rank)
 				}
 			})
+		})
+	}
+}
+
+type simulateKey struct {
+	Key       string
+	Timestamp int
+}
+
+func simulateKeyComparator(a, b simulateKey) int {
+	if a.Key != b.Key {
+		if a.Key < b.Key {
+			return -1
+		}
+		return 1
+	}
+	return a.Timestamp - b.Timestamp
+}
+
+func TestSkipList_Simulate(t *testing.T) {
+	for _, setup := range getTestCustomKeySetups[simulateKey, string]() {
+		t.Run(setup.name, func(t *testing.T) {
+			sl := setup.constructor(simulateKeyComparator)
+
+			sl.Insert(simulateKey{Key: "ABC", Timestamp: 10000}, "value1")
+			sl.Insert(simulateKey{Key: "ABC", Timestamp: 10001}, "value2")
+			sl.Insert(simulateKey{Key: "ABC", Timestamp: 9999}, "value3")
+			sl.Insert(simulateKey{Key: "DEF", Timestamp: 10000}, "value4")
+
+			// Test searching for specific keys
+			node, ok := sl.Search(simulateKey{Key: "ABC", Timestamp: 10000})
+			if !ok || node.Value() != "value1" {
+				t.Errorf("Search(ABC, 10000): Expected 'value1', got '%v'", node.Value())
+			}
+
+			node, ok = sl.Search(simulateKey{Key: "ABC", Timestamp: 9999})
+			if !ok || node.Value() != "value3" {
+				t.Errorf("Search(ABC, 9999): Expected 'value3', got '%v'", node.Value())
+			}
+
+			node, ok = sl.Search(simulateKey{Key: "DEF", Timestamp: 10000})
+			if !ok || node.Value() != "value4" {
+				t.Errorf("Search(DEF, 10000): Expected 'value4', got '%v'", node.Value())
+			}
+
+			// Test Iterator
+
+			it := sl.NewIterator()
+			var collectedKeys []simulateKey
+			expectedKeys := []simulateKey{
+				{Key: "ABC", Timestamp: 9999},
+				{Key: "ABC", Timestamp: 10000},
+				{Key: "ABC", Timestamp: 10001},
+				{Key: "DEF", Timestamp: 10000},
+			}
+
+			for it.Next() {
+				collectedKeys = append(collectedKeys, it.Key())
+			}
+
+			if len(collectedKeys) != len(expectedKeys) {
+				t.Fatalf("Expected %d keys, got %d. Keys: %v", len(expectedKeys), len(collectedKeys), collectedKeys)
+			}
+			for i, k := range collectedKeys {
+				if k != expectedKeys[i] {
+					t.Errorf("Expected key %+v at index %d, got %+v", expectedKeys[i], i, k)
+				}
+			}
+
+			// test range search iterator
+			it = sl.NewIterator()
+			if !it.Seek(simulateKey{Key: "ABC", Timestamp: 9999}) {
+				t.Fatal("Seek(ABC, 9999) should return true")
+			}
+			if it.Key() != (simulateKey{Key: "ABC", Timestamp: 9999}) {
+				t.Errorf("Seek(ABC, 9999): Expected key %+v, got %+v", simulateKey{Key: "ABC", Timestamp: 9999}, it.Key())
+			}
+
+			// test iterator seek to non-existing key
+			it = sl.NewIterator()
+			if !it.Seek(simulateKey{Key: "ABC", Timestamp: 10002}) {
+				t.Fatal("Seek(ABC, 10002) should return true")
+			}
+			if it.Key() != (simulateKey{Key: "DEF", Timestamp: 10000}) {
+				t.Errorf("Seek(ABC, 10002): Expected key %+v, got %+v", simulateKey{Key: "DEF", Timestamp: 10000}, it.Key())
+			}
 		})
 	}
 }
